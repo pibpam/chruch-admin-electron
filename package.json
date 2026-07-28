@@ -1,8 +1,8 @@
 {
   "name": "church-admin-electron",
-  "productName": "church-admin-electron",
+  "productName": "ChurchAdmin",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "Sistema para Gestão de Igrejas",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
@@ -24,6 +24,7 @@
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
     "@electron-forge/plugin-fuses": "^7.11.2",
     "@electron-forge/plugin-vite": "^7.11.2",
+    "@electron-forge/publisher-github": "^7.11.2",
     "@electron/fuses": "^1.8.0",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
@@ -31,10 +32,11 @@
     "electron": "43.2.0",
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
-    "typescript": "~4.5.4",
+    "typescript": "^5.9.3",
     "vite": "^5.4.21"
   },
   "dependencies": {
-    "electron-squirrel-startup": "^1.0.1"
+    "electron-squirrel-startup": "^1.0.1",
+    "update-electron-app": "^3.3.0"
   }
 }

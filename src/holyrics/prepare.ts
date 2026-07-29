@@ -132,10 +132,11 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
   }
 
   let holyricsEventId = params.holyricsEventId;
+
   if (!holyricsEventId) {
     const created = await client.request<{ id: string }>('CreateEvent', {
       name: params.eventName,
-      datetime: params.eventDateTime,
+      // datetime: '2026-09-16 21:00:00',
     });
     holyricsEventId = created.id;
   }

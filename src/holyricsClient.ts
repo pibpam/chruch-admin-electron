@@ -29,6 +29,9 @@ export class HolyricsClient {
     }
 
     const body = await response.json().catch((): null => null);
+
+    console.log(body)
+
     if (!body || body.status !== 'ok') {
       if (!body) console.error(`Resposta inválida do Holyrics em ${action}`);
       else console.error(`Erro do Holyrics em ${action}:`, body.error);

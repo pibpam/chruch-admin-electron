@@ -31,7 +31,7 @@ updateElectronApp({ repo: 'pibpam/chruch-admin-electron' });
  * controles de Preparar/Executar/Sincronizar (ver docs/integracao-holyrics.md
  * seção 2). Em dev aponta pro Vite local; em produção, pro domínio publicado.
  */
-const ADMIN_WEB_URL = process.env.ADMIN_WEB_URL || 'http://localhost:5173';
+const ADMIN_WEB_URL = process.env.ADMIN_WEB_URL || 'https://admin.pibpam.org';
 
 const createWindow = () => {
   const mainWindow = new BrowserWindow({

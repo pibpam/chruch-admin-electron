@@ -11,30 +11,30 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    icon: './assets/icon',
+    icon: "./assets/icon",
   },
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({
-      setupIcon: './assets/icon.ico',
+      setupIcon: "./assets/icon.ico",
     }),
-    new MakerZIP({}, ['darwin']),
+    new MakerZIP({}, ["darwin", "win32"]),
     new MakerRpm({
       options: {
-        icon: './assets/icon.png',
+        icon: "./assets/icon.png",
       },
     }),
     new MakerDeb({
       options: {
-        icon: './assets/icon.png',
+        icon: "./assets/icon.png",
       },
     }),
   ],
   publishers: [
     new PublisherGithub({
       repository: {
-        owner: 'pibpam',
-        name: 'chruch-admin-electron',
+        owner: "pibpam",
+        name: "chruch-admin-electron",
       },
       prerelease: false,
     }),
@@ -46,20 +46,20 @@ const config: ForgeConfig = {
       build: [
         {
           // `entry` is just an alias for `build.lib.entry` in the corresponding file of `config`.
-          entry: 'src/main.ts',
-          config: 'vite.main.config.ts',
-          target: 'main',
+          entry: "src/main.ts",
+          config: "vite.main.config.ts",
+          target: "main",
         },
         {
-          entry: 'src/preload.ts',
-          config: 'vite.preload.config.ts',
-          target: 'preload',
+          entry: "src/preload.ts",
+          config: "vite.preload.config.ts",
+          target: "preload",
         },
       ],
       renderer: [
         {
-          name: 'main_window',
-          config: 'vite.renderer.config.ts',
+          name: "main_window",
+          config: "vite.renderer.config.ts",
         },
       ],
     }),

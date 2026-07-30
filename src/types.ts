@@ -20,6 +20,7 @@ export interface IConfigurarIntegracaoParams {
   ip: string;
   port: string;
   alertTemaId?: string;
+  mediaBasePath?: string;
   catalogoUrls: ICatalogUrls;
 }
 
@@ -30,6 +31,8 @@ export interface IConfigurarIntegracaoParams {
  */
 export interface IManifestItem {
   type: 'video' | 'script' | 'image' | 'song' | 'verse' | 'file' | 'text' | 'title' | 'plain_text' | 'audio';
+  /** Id estável do item (uuid) — usado pro diff do Preparar incremental (ver holyrics/prepare.ts). */
+  id?: string;
   name?: string;
   background_color?: string;
   origem?: 'base' | 'evento';
@@ -54,6 +57,12 @@ export interface IManifestAsset {
   metadata: { url: string; etag: string; lastModified: string } | null;
 }
 
+/** Item do manifest tal como enviado na última preparação bem-sucedida, com o id que o
+ * Holyrics atribuiu na playlist — snapshot salvo em LiturgyPlan.lastPreparedManifest. */
+export interface IPreparedManifestItem extends IManifestItem {
+  holyricsItemId?: string;
+}
+
 export interface IPrepararEventoParams {
   planUuid: string;
   liturgyTypeSlug: string;
@@ -63,6 +72,10 @@ export interface IPrepararEventoParams {
   holyricsEventId?: string;
   manifest: IManifestItem[];
   assets: IManifestAsset[];
+  /** Snapshot da preparação anterior (LiturgyPlan.lastPreparedManifest) — permite um Preparar
+   * incremental (só remove/adiciona o que mudou) em vez de sempre reconstruir a playlist
+   * inteira. Ausente/incompleto sempre cai no fallback seguro de reconstrução total. */
+  previousManifest?: IPreparedManifestItem[];
 }
 
 export interface IPrepararEventoItemResult {
@@ -74,6 +87,8 @@ export interface IPrepararEventoItemResult {
 export interface IPrepararEventoResult {
   holyricsEventId: string;
   items: IPrepararEventoItemResult[];
+  /** Novo snapshot pra página persistir em LiturgyPlan.lastPreparedManifest. */
+  preparedManifest: IPreparedManifestItem[];
 }
 
 export interface IPendingSong {

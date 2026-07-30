@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { state } from './state';
 
 /**
  * Pasta local onde o Electron salva os assets baixados do S3, organizados por
@@ -8,10 +9,14 @@ import path from 'node:path';
  * imagem/arquivo), já que o Holyrics resolve um item por nome de arquivo
  * dentro da pasta que ele mesmo tem configurada — a API não expõe esse
  * caminho, então é combinado manualmente uma vez na configuração da máquina.
- * Convenção: C:\holyrics\base-midia\<tipo>, sobrescrevível via
- * HOLYRICS_MEDIA_BASE_PATH.
+ * Vem da tela de configuração do Holyrics no admin web (ChurchHolyricsConfig.mediaBasePath),
+ * repassada aqui via holyrics:configurar (ver state.mediaBasePath). HOLYRICS_MEDIA_BASE_PATH
+ * e a convenção C:\holyrics\base-midia seguem valendo como fallback pra quem ainda não
+ * preencheu o campo na config.
  */
-const BASE_PATH = process.env.HOLYRICS_MEDIA_BASE_PATH || 'C:\\holyrics\\base-midia';
+function getBasePath(): string {
+  return state.mediaBasePath || process.env.HOLYRICS_MEDIA_BASE_PATH || 'C:\\holyrics\\base-midia';
+}
 
 const FOLDER_BY_TYPE: Record<string, string> = {
   audio: 'audio',
@@ -24,7 +29,7 @@ const FOLDER_BY_TYPE: Record<string, string> = {
 export function getMediaFolder(type: string): string {
   const folder = FOLDER_BY_TYPE[type];
   if (!folder) throw new Error(`Tipo de mídia sem pasta configurada: ${type}`);
-  return path.join(BASE_PATH, folder);
+  return path.join(getBasePath(), folder);
 }
 
 export async function getMediaFilePath(type: string, fileName: string): Promise<string> {

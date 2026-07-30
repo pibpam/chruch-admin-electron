@@ -27,10 +27,6 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
   executarEvento: (eventId: string): Promise<{ status: string }> =>
     ipcRenderer.invoke('holyrics:executar', eventId),
 
-  proximoItem: (): Promise<{ status: string }> => ipcRenderer.invoke('holyrics:next'),
-
-  itemAnterior: (): Promise<{ status: string }> => ipcRenderer.invoke('holyrics:previous'),
-
   criarMusicasPendentes: (pendentes: IPendingSong[]): Promise<ICriarMusicaPendenteResult[]> =>
     ipcRenderer.invoke('holyrics:criar-pendentes', pendentes),
 

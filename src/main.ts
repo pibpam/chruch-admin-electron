@@ -6,7 +6,7 @@ import { updateElectronApp } from 'update-electron-app';
 import { state } from './state';
 import { carregarCatalogoDeUrls, sincronizarCatalogo } from './holyrics/catalog';
 import { prepararEvento } from './holyrics/prepare';
-import { executarEvento, itemAnterior, proximoItem } from './holyrics/execute';
+import { executarEvento } from './holyrics/execute';
 import { statusConexao } from './holyrics/healthcheck';
 import { criarMusicasPendentes } from './holyrics/pendingSongs';
 import {
@@ -56,6 +56,7 @@ const createWindow = () => {
 ipcMain.handle('holyrics:configurar', async (_event, dados: IConfigurarIntegracaoParams) => {
   state.connection = { token: dados.token, ip: dados.ip, port: dados.port };
   state.alertTemaId = dados.alertTemaId;
+  state.mediaBasePath = dados.mediaBasePath;
   await carregarCatalogoDeUrls(dados.catalogoUrls);
   return { status: 'ok' };
 });
@@ -71,10 +72,6 @@ ipcMain.handle('holyrics:preparar', async (_event, params: IPrepararEventoParams
 ipcMain.handle('holyrics:executar', async (_event, eventId: string) => {
   return executarEvento(eventId);
 });
-
-ipcMain.handle('holyrics:next', async () => proximoItem());
-
-ipcMain.handle('holyrics:previous', async () => itemAnterior());
 
 ipcMain.handle('holyrics:criar-pendentes', async (_event, pendentes: IPendingSong[]) => {
   return criarMusicasPendentes(pendentes);

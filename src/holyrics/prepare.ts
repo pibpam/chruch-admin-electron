@@ -5,6 +5,7 @@ import { fileExists, getMediaFilePath } from '../mediaPaths';
 import {
   IManifestAsset,
   IManifestItem,
+  IPreparedManifestItem,
   IPrepararEventoItemResult,
   IPrepararEventoParams,
   IPrepararEventoResult,
@@ -115,9 +116,129 @@ function itemAlerta(mensagem: string): Record<string, unknown> {
   };
 }
 
+interface IIncrementalPlan {
+  /** holyricsItemId (da preparação anterior) dos itens que saíram ou mudaram de conteúdo. */
+  toRemoveHolyricsIds: string[];
+  /** Índices em `manifest`/`resolved` dos itens novos/alterados a adicionar (só no fim). */
+  toAddIndexes: number[];
+  /** Índices em `manifest` dos itens que não mudaram — mantêm o holyricsItemId anterior. */
+  unchangedIndexes: number[];
+}
+
 /**
- * Ver docs/integracao-holyrics.md seção 7. Idempotente: sempre limpa e
- * reconstrói a playlist do evento a partir do manifest atual.
+ * Decide se dá pra fazer um Preparar incremental (só remove/adiciona o que mudou) em vez de
+ * sempre apagar e reconstruir a playlist inteira — ver item 3+12 do plano de correções do
+ * Holyrics. Só retorna um plano quando é seguro; qualquer incerteza cai no fallback de
+ * reconstrução total (`null`), que é sempre correto.
+ *
+ * Exige, nessa ordem: (1) existe um snapshot anterior com pelo menos um item realmente
+ * adicionado à playlist da vez passada (`holyricsItemId`); (2) os itens que sobrevivem
+ * (mesmo id, mesmo conteúdo mapeado pro Holyrics) mantêm a MESMA ordem relativa antes/depois;
+ * (3) tudo que é novo ou mudou de conteúdo vem DEPOIS de todos os sobreviventes na ordem atual
+ * — só assim dá pra confiar que um `AddToPlaylist` (que só sabe colocar no fim) reproduz a
+ * ordem certa sem precisar mover nada.
+ *
+ * Limitação aceita: só remove pelos `holyricsItemId` que o próprio snapshot conhece — se
+ * alguém mexeu na playlist direto no Holyrics fora do fluxo de Preparar desde a última vez,
+ * esse ajuste manual não é limpo (diferente do fallback, que sempre limpa TUDO que encontrar
+ * via GetMediaPlaylist). Ver seção de riscos do plano de correções.
+ */
+function canUseIncrementalPath(
+  manifest: IManifestItem[],
+  resolved: (Record<string, unknown> | null)[],
+  previousManifest?: IPreparedManifestItem[],
+): IIncrementalPlan | null {
+  if (!previousManifest || previousManifest.length === 0) return null;
+
+  const currentLive = manifest
+    .map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => !!item.id && resolved[index] !== null);
+  if (currentLive.length === 0) return null;
+
+  const previousLive = previousManifest.filter((item) => !!item.id && !!item.holyricsItemId);
+  if (previousLive.length === 0) return null;
+
+  const previousById = new Map(previousLive.map((item) => [item.id as string, item]));
+
+  const unchangedIndexes: number[] = [];
+  const unchangedIds = new Set<string>();
+  for (const { item, index } of currentLive) {
+    const previousItem = previousById.get(item.id as string);
+    if (!previousItem) continue;
+    if (JSON.stringify(resolved[index]) !== JSON.stringify(mapManifestItemToAddItem(previousItem))) continue;
+    unchangedIndexes.push(index);
+    unchangedIds.add(item.id as string);
+  }
+  if (unchangedIndexes.length === 0) return null; // nada aproveitável — reconstrução total é igual de eficiente
+
+  const previousSurvivorOrder = previousLive
+    .filter((item) => unchangedIds.has(item.id as string))
+    .map((item) => item.id as string);
+  const currentLiveIds = currentLive.map(({ item }) => item.id as string);
+  const currentSurvivorOrder = currentLiveIds.filter((id) => unchangedIds.has(id));
+  if (JSON.stringify(previousSurvivorOrder) !== JSON.stringify(currentSurvivorOrder)) return null;
+
+  const lastSurvivorPos = currentLiveIds.lastIndexOf(currentSurvivorOrder[currentSurvivorOrder.length - 1]);
+  const firstNonSurvivorPos = currentLiveIds.findIndex((id) => !unchangedIds.has(id));
+  if (firstNonSurvivorPos !== -1 && firstNonSurvivorPos < lastSurvivorPos) return null;
+
+  const toAddIndexes = currentLive.filter(({ item }) => !unchangedIds.has(item.id as string)).map(({ index }) => index);
+  const toRemoveHolyricsIds = previousLive
+    .filter((item) => !unchangedIds.has(item.id as string))
+    .map((item) => item.holyricsItemId as string);
+
+  return { toRemoveHolyricsIds, toAddIndexes, unchangedIndexes };
+}
+
+/**
+ * Monta o snapshot pra persistir em LiturgyPlan.lastPreparedManifest, associando o
+ * holyricsItemId de cada item que efetivamente entrou na playlist. Não confirmado contra a
+ * API real do Holyrics se `AddToPlaylist` devolve os ids atribuídos — por isso, em vez de
+ * confiar no retorno desse request (descartado), consulta `GetMediaPlaylist` de novo depois
+ * e casa por posição, assumindo que a playlist reflete a ordem em que os itens foram
+ * adicionados. Ver seção de riscos do plano de correções do Holyrics.
+ */
+function buildPreparedManifest(
+  manifest: IManifestItem[],
+  resolved: (Record<string, unknown> | null)[],
+  playlistDepois: { id: string }[],
+  incremental: IIncrementalPlan | null,
+  previousManifest?: IPreparedManifestItem[],
+): IPreparedManifestItem[] {
+  const holyricsIdByIndex = new Map<number, string>();
+
+  if (incremental) {
+    const previousById = new Map((previousManifest || []).map((item) => [item.id, item]));
+    for (const index of incremental.unchangedIndexes) {
+      const previousItem = previousById.get(manifest[index].id);
+      if (previousItem?.holyricsItemId) holyricsIdByIndex.set(index, previousItem.holyricsItemId);
+    }
+    const knownHolyricsIds = new Set(holyricsIdByIndex.values());
+    const newEntries = playlistDepois.filter((entry) => !knownHolyricsIds.has(entry.id));
+    incremental.toAddIndexes.forEach((index, position) => {
+      const entry = newEntries[position];
+      if (entry) holyricsIdByIndex.set(index, entry.id);
+    });
+  } else {
+    const resolvedIndexes = manifest.map((_, index) => index).filter((index) => resolved[index] !== null);
+    resolvedIndexes.forEach((index, position) => {
+      const entry = playlistDepois[position];
+      if (entry) holyricsIdByIndex.set(index, entry.id);
+    });
+  }
+
+  return manifest.map((item, index) => {
+    const holyricsItemId = holyricsIdByIndex.get(index);
+    return holyricsItemId ? { ...item, holyricsItemId } : { ...item };
+  });
+}
+
+/**
+ * Ver docs/integracao-holyrics.md seção 7 e o plano de correções do Holyrics (itens 3+12).
+ * O Evento (holyricsEventId) nunca é recriado depois da primeira vez. A partir daí, se
+ * houver um snapshot da preparação anterior utilizável, só remove/adiciona o que mudou
+ * (canUseIncrementalPath); caso contrário, cai no comportamento antigo — sempre idempotente,
+ * já que reconstrói do zero a partir do manifest atual.
  */
 export async function prepararEvento(params: IPrepararEventoParams): Promise<IPrepararEventoResult> {
   const client = new HolyricsClient(state.requireConnection());
@@ -156,28 +277,21 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
     }
   }
 
-  const existentes = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
-  if (existentes.length > 0) {
-    await client.request('RemoveFromMediaPlaylist', {
-      ids: existentes.map((existente) => existente.id),
-      event_id: holyricsEventId,
-    });
-  }
-
   const results: IPrepararEventoItemResult[] = [];
-  const itemsToAdd: Record<string, unknown>[] = [];
+  const resolved: (Record<string, unknown> | null)[] = [];
 
   for (let index = 0; index < params.manifest.length; index++) {
     const item = params.manifest[index];
 
     if (item.hidden) {
       results.push({ index, status: 'skipped', message: 'Item oculto' });
+      resolved.push(null);
       continue;
     }
 
     const erroDownload = errosDownload.get(index);
     if (erroDownload) {
-      itemsToAdd.push(itemAlerta(erroDownload));
+      resolved.push(itemAlerta(erroDownload));
       results.push({ index, status: 'error', message: erroDownload });
       continue;
     }
@@ -185,16 +299,50 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
     const mapped = mapManifestItemToAddItem(item);
     if (!mapped) {
       const mensagem = `Este item de ${TYPE_LABEL[item.type] || item.type} está com informações faltando e não pôde ser montado.`;
-      itemsToAdd.push(itemAlerta(mensagem));
+      resolved.push(itemAlerta(mensagem));
       results.push({ index, status: 'error', message: mensagem });
       continue;
     }
 
-    itemsToAdd.push(mapped);
+    resolved.push(mapped);
     results.push({ index, status: 'ok' });
   }
 
-  await client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId });
+  const incremental = canUseIncrementalPath(params.manifest, resolved, params.previousManifest);
 
-  return { holyricsEventId, items: results };
+  if (incremental) {
+    if (incremental.toRemoveHolyricsIds.length > 0) {
+      await client.request('RemoveFromMediaPlaylist', {
+        ids: incremental.toRemoveHolyricsIds,
+        event_id: holyricsEventId,
+      });
+    }
+    if (incremental.toAddIndexes.length > 0) {
+      const itemsToAdd = incremental.toAddIndexes.map((index) => resolved[index] as Record<string, unknown>);
+      await client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId });
+    }
+  } else {
+    const existentes = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
+    if (existentes.length > 0) {
+      await client.request('RemoveFromMediaPlaylist', {
+        ids: existentes.map((existente) => existente.id),
+        event_id: holyricsEventId,
+      });
+    }
+    const itemsToAdd = resolved.filter((item): item is Record<string, unknown> => item !== null);
+    if (itemsToAdd.length > 0) {
+      await client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId });
+    }
+  }
+
+  const playlistDepois = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
+  const preparedManifest = buildPreparedManifest(
+    params.manifest,
+    resolved,
+    playlistDepois,
+    incremental,
+    params.previousManifest,
+  );
+
+  return { holyricsEventId, items: results, preparedManifest };
 }

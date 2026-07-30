@@ -9,6 +9,7 @@ import { IHolyricsConnection, TCatalogFile } from './types';
 class HolyricsState {
   connection: IHolyricsConnection | null = null;
   alertTemaId: string | undefined;
+  mediaBasePath: string | undefined;
   catalogoLocal: Partial<Record<TCatalogFile, unknown[]>> = {};
 
   requireConnection(): IHolyricsConnection {

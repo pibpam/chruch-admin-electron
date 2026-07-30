@@ -28,15 +28,3 @@ export async function executarEvento(eventId: string): Promise<{ status: string 
 
   return { status: 'ok' };
 }
-
-export async function proximoItem(): Promise<{ status: string }> {
-  const client = new HolyricsClient(state.requireConnection());
-  await client.request('ActionNext', {});
-  return { status: 'ok' };
-}
-
-export async function itemAnterior(): Promise<{ status: string }> {
-  const client = new HolyricsClient(state.requireConnection());
-  await client.request('ActionPrevious', {});
-  return { status: 'ok' };
-}

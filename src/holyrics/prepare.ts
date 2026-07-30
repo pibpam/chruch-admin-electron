@@ -116,129 +116,19 @@ function itemAlerta(mensagem: string): Record<string, unknown> {
   };
 }
 
-interface IIncrementalPlan {
-  /** holyricsItemId (da preparação anterior) dos itens que saíram ou mudaram de conteúdo. */
-  toRemoveHolyricsIds: string[];
-  /** Índices em `manifest`/`resolved` dos itens novos/alterados a adicionar (só no fim). */
-  toAddIndexes: number[];
-  /** Índices em `manifest` dos itens que não mudaram — mantêm o holyricsItemId anterior. */
-  unchangedIndexes: number[];
-}
-
 /**
- * Decide se dá pra fazer um Preparar incremental (só remove/adiciona o que mudou) em vez de
- * sempre apagar e reconstruir a playlist inteira — ver item 3+12 do plano de correções do
- * Holyrics. Só retorna um plano quando é seguro; qualquer incerteza cai no fallback de
- * reconstrução total (`null`), que é sempre correto.
+ * Ver docs/integracao-holyrics.md seção 7. O Evento (holyricsEventId) nunca é recriado
+ * depois da primeira vez — só a playlist é sempre apagada e reconstruída do zero a partir
+ * do manifest atual (idempotente, único jeito confirmado como confiável: uma tentativa
+ * anterior de fazer isso incrementalmente, só removendo/adicionando o que mudou, causou
+ * itens duplicados na playlist em teste real — revertida).
  *
- * Exige, nessa ordem: (1) existe um snapshot anterior com pelo menos um item realmente
- * adicionado à playlist da vez passada (`holyricsItemId`); (2) os itens que sobrevivem
- * (mesmo id, mesmo conteúdo mapeado pro Holyrics) mantêm a MESMA ordem relativa antes/depois;
- * (3) tudo que é novo ou mudou de conteúdo vem DEPOIS de todos os sobreviventes na ordem atual
- * — só assim dá pra confiar que um `AddToPlaylist` (que só sabe colocar no fim) reproduz a
- * ordem certa sem precisar mover nada.
- *
- * Limitação aceita: só remove pelos `holyricsItemId` que o próprio snapshot conhece — se
- * alguém mexeu na playlist direto no Holyrics fora do fluxo de Preparar desde a última vez,
- * esse ajuste manual não é limpo (diferente do fallback, que sempre limpa TUDO que encontrar
- * via GetMediaPlaylist). Ver seção de riscos do plano de correções.
- */
-function canUseIncrementalPath(
-  manifest: IManifestItem[],
-  resolved: (Record<string, unknown> | null)[],
-  previousManifest?: IPreparedManifestItem[],
-): IIncrementalPlan | null {
-  if (!previousManifest || previousManifest.length === 0) return null;
-
-  const currentLive = manifest
-    .map((item, index) => ({ item, index }))
-    .filter(({ item, index }) => !!item.id && resolved[index] !== null);
-  if (currentLive.length === 0) return null;
-
-  const previousLive = previousManifest.filter((item) => !!item.id && !!item.holyricsItemId);
-  if (previousLive.length === 0) return null;
-
-  const previousById = new Map(previousLive.map((item) => [item.id as string, item]));
-
-  const unchangedIndexes: number[] = [];
-  const unchangedIds = new Set<string>();
-  for (const { item, index } of currentLive) {
-    const previousItem = previousById.get(item.id as string);
-    if (!previousItem) continue;
-    if (JSON.stringify(resolved[index]) !== JSON.stringify(mapManifestItemToAddItem(previousItem))) continue;
-    unchangedIndexes.push(index);
-    unchangedIds.add(item.id as string);
-  }
-  if (unchangedIndexes.length === 0) return null; // nada aproveitável — reconstrução total é igual de eficiente
-
-  const previousSurvivorOrder = previousLive
-    .filter((item) => unchangedIds.has(item.id as string))
-    .map((item) => item.id as string);
-  const currentLiveIds = currentLive.map(({ item }) => item.id as string);
-  const currentSurvivorOrder = currentLiveIds.filter((id) => unchangedIds.has(id));
-  if (JSON.stringify(previousSurvivorOrder) !== JSON.stringify(currentSurvivorOrder)) return null;
-
-  const lastSurvivorPos = currentLiveIds.lastIndexOf(currentSurvivorOrder[currentSurvivorOrder.length - 1]);
-  const firstNonSurvivorPos = currentLiveIds.findIndex((id) => !unchangedIds.has(id));
-  if (firstNonSurvivorPos !== -1 && firstNonSurvivorPos < lastSurvivorPos) return null;
-
-  const toAddIndexes = currentLive.filter(({ item }) => !unchangedIds.has(item.id as string)).map(({ index }) => index);
-  const toRemoveHolyricsIds = previousLive
-    .filter((item) => !unchangedIds.has(item.id as string))
-    .map((item) => item.holyricsItemId as string);
-
-  return { toRemoveHolyricsIds, toAddIndexes, unchangedIndexes };
-}
-
-/**
- * Monta o snapshot pra persistir em LiturgyPlan.lastPreparedManifest, associando o
- * holyricsItemId de cada item que efetivamente entrou na playlist. Não confirmado contra a
- * API real do Holyrics se `AddToPlaylist` devolve os ids atribuídos — por isso, em vez de
- * confiar no retorno desse request (descartado), consulta `GetMediaPlaylist` de novo depois
- * e casa por posição, assumindo que a playlist reflete a ordem em que os itens foram
- * adicionados. Ver seção de riscos do plano de correções do Holyrics.
- */
-function buildPreparedManifest(
-  manifest: IManifestItem[],
-  resolved: (Record<string, unknown> | null)[],
-  playlistDepois: { id: string }[],
-  incremental: IIncrementalPlan | null,
-  previousManifest?: IPreparedManifestItem[],
-): IPreparedManifestItem[] {
-  const holyricsIdByIndex = new Map<number, string>();
-
-  if (incremental) {
-    const previousById = new Map((previousManifest || []).map((item) => [item.id, item]));
-    for (const index of incremental.unchangedIndexes) {
-      const previousItem = previousById.get(manifest[index].id);
-      if (previousItem?.holyricsItemId) holyricsIdByIndex.set(index, previousItem.holyricsItemId);
-    }
-    const knownHolyricsIds = new Set(holyricsIdByIndex.values());
-    const newEntries = playlistDepois.filter((entry) => !knownHolyricsIds.has(entry.id));
-    incremental.toAddIndexes.forEach((index, position) => {
-      const entry = newEntries[position];
-      if (entry) holyricsIdByIndex.set(index, entry.id);
-    });
-  } else {
-    const resolvedIndexes = manifest.map((_, index) => index).filter((index) => resolved[index] !== null);
-    resolvedIndexes.forEach((index, position) => {
-      const entry = playlistDepois[position];
-      if (entry) holyricsIdByIndex.set(index, entry.id);
-    });
-  }
-
-  return manifest.map((item, index) => {
-    const holyricsItemId = holyricsIdByIndex.get(index);
-    return holyricsItemId ? { ...item, holyricsItemId } : { ...item };
-  });
-}
-
-/**
- * Ver docs/integracao-holyrics.md seção 7 e o plano de correções do Holyrics (itens 3+12).
- * O Evento (holyricsEventId) nunca é recriado depois da primeira vez. A partir daí, se
- * houver um snapshot da preparação anterior utilizável, só remove/adiciona o que mudou
- * (canUseIncrementalPath); caso contrário, cai no comportamento antigo — sempre idempotente,
- * já que reconstrói do zero a partir do manifest atual.
+ * Ordem: `AddToPlaylist` é chamado com os itens em ordem INVERSA à do manifest. Isso é uma
+ * correção empírica — a documentação da API (github.com/holyrics/API-Server) diz que os
+ * itens são adicionados ao FIM da lista por padrão, o que deveria preservar a ordem do
+ * manifest sem precisar inverter nada, mas em teste real (ver feedback do usuário) a ordem
+ * no Holyrics saía invertida enviando na ordem direta. Se isso for corrigido/mudar do lado
+ * do Holyrics no futuro, ajustar aqui.
  */
 export async function prepararEvento(params: IPrepararEventoParams): Promise<IPrepararEventoResult> {
   const client = new HolyricsClient(state.requireConnection());
@@ -308,41 +198,39 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
     results.push({ index, status: 'ok' });
   }
 
-  const incremental = canUseIncrementalPath(params.manifest, resolved, params.previousManifest);
-
-  if (incremental) {
-    if (incremental.toRemoveHolyricsIds.length > 0) {
-      await client.request('RemoveFromMediaPlaylist', {
-        ids: incremental.toRemoveHolyricsIds,
-        event_id: holyricsEventId,
-      });
-    }
-    if (incremental.toAddIndexes.length > 0) {
-      const itemsToAdd = incremental.toAddIndexes.map((index) => resolved[index] as Record<string, unknown>);
-      await client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId });
-    }
-  } else {
-    const existentes = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
-    if (existentes.length > 0) {
-      await client.request('RemoveFromMediaPlaylist', {
-        ids: existentes.map((existente) => existente.id),
-        event_id: holyricsEventId,
-      });
-    }
-    const itemsToAdd = resolved.filter((item): item is Record<string, unknown> => item !== null);
-    if (itemsToAdd.length > 0) {
-      await client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId });
-    }
+  const existentes = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
+  if (existentes.length > 0) {
+    await client.request('RemoveFromMediaPlaylist', {
+      ids: existentes.map((existente) => existente.id),
+      event_id: holyricsEventId,
+    });
   }
 
+  // resolvedIndexes: índices (em params.manifest) dos itens que entram na playlist, na ordem
+  // do manifest. sendOrderIndexes: mesma coisa, mas na ordem em que são de fato enviados pro
+  // Holyrics (invertida — ver comentário da função).
+  const resolvedIndexes = resolved.map((_, index) => index).filter((index) => resolved[index] !== null);
+  const sendOrderIndexes = [...resolvedIndexes].reverse();
+
+  if (sendOrderIndexes.length > 0) {
+    const itemsToAdd = sendOrderIndexes.map((index) => resolved[index] as Record<string, unknown>);
+    await client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId });
+  }
+
+  // Snapshot pra lastPreparedManifest — não usado hoje pra decidir nada (preparação incremental
+  // foi revertida), mas mantido pra eventual uso futuro. Casa GetMediaPlaylist com a ordem em
+  // que os itens foram efetivamente enviados (sendOrderIndexes), não a ordem do manifest.
   const playlistDepois = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
-  const preparedManifest = buildPreparedManifest(
-    params.manifest,
-    resolved,
-    playlistDepois,
-    incremental,
-    params.previousManifest,
-  );
+  const holyricsIdByIndex = new Map<number, string>();
+  sendOrderIndexes.forEach((index, position) => {
+    const entry = playlistDepois[position];
+    if (entry) holyricsIdByIndex.set(index, entry.id);
+  });
+
+  const preparedManifest: IPreparedManifestItem[] = params.manifest.map((item, index) => {
+    const holyricsItemId = holyricsIdByIndex.get(index);
+    return holyricsItemId ? { ...item, holyricsItemId } : { ...item };
+  });
 
   return { holyricsEventId, items: results, preparedManifest };
 }

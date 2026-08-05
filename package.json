@@ -1,10 +1,10 @@
 {
   "name": "church-admin-electron",
   "productName": "ChurchAdmin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Sistema para Gestão de Igrejas",
   "main": ".vite/build/main.js",
-  "private": true,
+  "private": false,
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",

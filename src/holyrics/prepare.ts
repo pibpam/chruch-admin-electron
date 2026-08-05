@@ -62,7 +62,10 @@ function mapManifestItemToAddItem(item: IManifestItem): Record<string, unknown> 
       return {
         type: item.type,
         name: item.arquivo,
-        ...(item.type === 'video' && item.settings ? { settings: item.settings } : {}),
+        // Sempre explícito pra vídeo — sem isso, um vídeo sem "settings" (nunca mexido no
+        // toggle "Repetir em loop") não manda nada pro Holyrics, que cai no próprio default
+        // de player em vez de respeitar "não é loop".
+        ...(item.type === 'video' ? { settings: { repeat: !!item.settings?.repeat } } : {}),
       };
 
     case 'script':

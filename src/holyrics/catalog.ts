@@ -2,12 +2,6 @@ import { HolyricsClient } from '../holyricsClient';
 import { state } from '../state';
 import { ICatalogUrls } from '../types';
 
-interface IMusicaCatalogEntry {
-  id: string | number;
-  slides?: unknown;
-  [key: string]: unknown;
-}
-
 async function putJson(url: string, data: unknown): Promise<void> {
   const response = await fetch(url, {
     method: 'PUT',
@@ -19,33 +13,16 @@ async function putJson(url: string, data: unknown): Promise<void> {
 }
 
 /**
- * Preserva `slides` das músicas já conhecidas — confirmado contra a documentação oficial
- * da API do Holyrics (github.com/holyrics/API-Server) que GetSongs não devolve conteúdo de
- * letra (o tipo "Lyrics" só tem metadados: id/title/artist/author/note/key/bpm/groups/...);
- * só GetText tem `slides`. A única letra real que temos vem de PendingSongService.resolve()
- * no backend, gravada em musicas.json quando a música deixa de ser pendente. Sem esse merge,
- * um "Sincronizar catálogo" comum sobrescreve musicas.json inteiro com dados frescos do
- * Holyrics e apaga essa letra.
- */
-function preservarSlidesConhecidos(musicasFrescas: IMusicaCatalogEntry[]): IMusicaCatalogEntry[] {
-  const anteriores = (state.catalogoLocal.musicas as IMusicaCatalogEntry[] | undefined) ?? [];
-  const anteriorPorId = new Map(anteriores.map((entry) => [String(entry.id), entry]));
-
-  return musicasFrescas.map((entry) => {
-    const anterior = anteriorPorId.get(String(entry.id));
-    return anterior?.slides ? { ...entry, slides: anterior.slides } : entry;
-  });
-}
-
-/**
  * Espelha o catálogo do Holyrics pro S3 — ver docs/integracao-holyrics.md
- * seção 11. GetBibleVersions é deprecated (usa GetBibleVersionsV2).
+ * seção 11. GetBibleVersions é deprecated (usa GetBibleVersionsV2). `slides` em GetSongs
+ * (Lyrics.slides, v2.21.0+) já traz o texto de cada slide direto do Holyrics — fonte de
+ * verdade mais atual que qualquer cópia nossa, sem precisar preservar/mesclar nada.
  */
 export async function sincronizarCatalogo(urls: ICatalogUrls): Promise<{ status: string }> {
   const client = new HolyricsClient(state.requireConnection());
 
-  const [musicasFrescas, textos, temas, scripts, backgrounds, gruposMusica, versoesBiblia] = await Promise.all([
-    client.request<IMusicaCatalogEntry[]>('GetSongs', { fields: 'id,title,artist,author,key,bpm,groups,extras' }),
+  const [musicas, textos, temas, scripts, backgrounds, gruposMusica, versoesBiblia] = await Promise.all([
+    client.request<unknown[]>('GetSongs', { fields: 'id,title,artist,author,key,bpm,slides,groups,extras' }),
     client.request<unknown[]>('GetTexts', { fields: 'id,title,folder,slides' }),
     client.request<unknown[]>('GetThemes', {}),
     client.request<unknown[]>('GetScripts', {}),
@@ -53,8 +30,6 @@ export async function sincronizarCatalogo(urls: ICatalogUrls): Promise<{ status:
     client.request<unknown[]>('GetSongGroups', {}),
     client.request<unknown[]>('GetBibleVersionsV2', {}),
   ]);
-
-  const musicas = preservarSlidesConhecidos(musicasFrescas);
 
   state.catalogoLocal = {
     musicas,

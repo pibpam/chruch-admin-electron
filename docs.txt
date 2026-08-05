@@ -1,0 +1,115 @@
+Lyrics
+Nome	Tipo	Descrição
+id	String	ID da música
+title	String	Título da música
+artist	String	Artista da música
+author	String	Autor da música
+note	String	Anotação da música
+copyright	String	Copyright da música
+slides	Array<Object>	v2.21.0+
+slides.*.text	String	Texto do slide v2.21.0+
+slides.*.styled_text	String	Texto do slide com formatação styled (quando disponível) v2.24.0+
+slides.*.slide_description	String	Descrição do slide v2.21.1+
+slides.*.background_id	String	ID do tema ou plano de fundo salvo para o slide v2.21.0+
+slides.*.translations	Object	Traduções para o slide.
+Conjunto chave/valor. v2.25.0+
+formatting_type	String	basic styled advanced
+
+Ao utilizar este objeto em métodos de criação ou edição, se formatting_type=basic for utilizado, o valor da variável slides.*.text será utilizado, caso contrário, o valor da variável slides.*.styled_text será utilizado Padrão: basic v2.25.0+
+order	String	Ordem dos slides (índice a partir do 1), separado por vírgula v2.21.0+
+arrangements	Array<SongArrangement>	v2.25.1+
+title_translations	Object	Traduções para o slide título.
+Conjunto chave/valor. v2.25.0+
+key	String	Tom da música.
+Pode ser: C C# Db D D# Eb E F F# Gb G G# Ab A A# Bb B Cm C#m Dbm Dm D#m Ebm Em Fm F#m Gbm Gm G#m Abm Am A#m Bbm Bm
+bpm	Number	BPM da música
+time_sig	String	Tempo da música.
+Pode ser: 2/2 2/4 3/4 4/4 5/4 6/4 3/8 6/8 7/8 9/8 12/8
+groups	Array<Group>	Grupos onde a música está adicionada read-only
+linked_audio_file	String	Caminho do arquivo de áudio linkado com a música v2.22.0+
+linked_backing_track_file	String	Caminho do arquivo de áudio (playback) linkado com a música v2.22.0+
+streaming	Object	URI ou ID dos streamings v2.22.0+
+streaming.audio	Object	Áudio v2.22.0+
+streaming.audio.spotify	String	v2.22.0+
+streaming.audio.youtube	String	v2.22.0+
+streaming.audio.deezer	String	v2.22.0+
+streaming.audio.apple_music	String	v2.29.0+
+streaming.audio.amazon_music	String	v2.29.0+
+streaming.backing_track	Object	Playback v2.22.0+
+streaming.backing_track.spotify	String	v2.22.0+
+streaming.backing_track.youtube	String	v2.22.0+
+streaming.backing_track.deezer	String	v2.22.0+
+streaming.backing_track.apple_music	String	v2.29.0+
+streaming.backing_track.amazon_music	String	v2.29.0+
+midi	Midi	Atalho MIDI do item
+extras	Object	Mapa de objetos extras (adicionados pelo usuário) v2.21.0+
+theme	String	ID do tema salvo para a música v2.25.0+
+archived	Boolean	Se a música está arquivada
+tags	Array<String>	v2.29.0+
+metadata.modified_time_millis	Number	Data de modificação do arquivo. (timestamp) v2.25.0+ read-only
+Ver exemplo
+{
+  "id": "0",
+  "title": "",
+  "artist": "",
+  "author": "",
+  "note": "",
+  "copyright": "",
+  "language": "",
+  "slides": [
+    {
+      "text": "Slide 1 line 1\nSlide 1 line 2",
+      "styled_text": "Slide 1 line 1\nSlide 1 line 2",
+      "slide_description": "Verse 1",
+      "background_id": null,
+      "transition_settings_id": null,
+      "translations": null
+    },
+    {
+      "text": "Slide 2 line 1\nSlide 2 line 2",
+      "styled_text": "Slide 2 line 1\nSlide 2 line 2",
+      "slide_description": "Chorus",
+      "background_id": null,
+      "transition_settings_id": null,
+      "translations": null
+    },
+    {
+      "text": "Slide 3 line 1\nSlide 3 line 2",
+      "styled_text": "Slide 3 line 1\nSlide 3 line 2",
+      "slide_description": "Verse 2",
+      "background_id": null,
+      "transition_settings_id": null,
+      "translations": null
+    }
+  ],
+  "formatting_type": "basic",
+  "order": "1,2,3,2,2",
+  "title_translations": null,
+  "key": "",
+  "bpm": 0.0,
+  "time_sig": "",
+  "linked_audio_file": "",
+  "linked_backing_track_file": "",
+  "streaming": {
+    "audio": {
+      "spotify": "",
+      "youtube": "",
+      "deezer": "",
+      "apple_music": "",
+      "amazon_music": ""
+    },
+    "backing_track": {
+      "spotify": "",
+      "youtube": "",
+      "deezer": "",
+      "apple_music": "",
+      "amazon_music": ""
+    }
+  },
+  "extras": {
+    "extra": ""
+  },
+  "theme": null,
+  "transition_settings_id": null,
+  "archived": false
+}

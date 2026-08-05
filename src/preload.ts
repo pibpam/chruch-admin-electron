@@ -31,4 +31,6 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
     ipcRenderer.invoke('holyrics:criar-pendentes', pendentes),
 
   statusConexao: (): Promise<IHealthcheckResult> => ipcRenderer.invoke('holyrics:healthcheck'),
+
+  getVersaoApp: (): Promise<string> => ipcRenderer.invoke('app:versao'),
 });

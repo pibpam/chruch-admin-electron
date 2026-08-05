@@ -79,6 +79,10 @@ ipcMain.handle('holyrics:criar-pendentes', async (_event, pendentes: IPendingSon
 
 ipcMain.handle('holyrics:healthcheck', async () => statusConexao());
 
+// Versão do próprio app (package.json, via Electron), não do Holyrics — pra página web
+// conseguir mostrar qual build está rodando no computador da igreja (ver auto-update).
+ipcMain.handle('app:versao', () => app.getVersion());
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.

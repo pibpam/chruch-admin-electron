@@ -44,11 +44,14 @@ Argumento opcional: `patch` (padrão), `minor`, `major` ou uma versão exata (`1
    - `squirrel.windows/x64/RELEASES`
    - `zip/win32/x64/ChurchAdmin-win32-x64-X.Y.Z.zip`
 
-   Confira com `find out/make -type f` que os arquivos existem e que o nome contém a versão nova. Se o build falhar ou faltar algum arquivo, pare e relate, sem fazer push nem criar a release (o commit fica só local; informe o usuário).
+   Confira com `find out/make -type f` o que foi gerado e se os nomes contêm a versão nova. Os artefatos do Squirrel (`Setup.exe`, `.nupkg`, `RELEASES`) precisam de Wine/Mono fora do Windows; em macOS/Linux sem eles o maker pode não gerar nada ou falhar.
+   - Se `yarn make-win` falhar, mas o `.zip` existir (ou o usuário mandar seguir), siga **sem o `Setup.exe`** (e sem o que não foi gerado) e avise o usuário do que ficou de fora.
+   - Sem `.nupkg` + `RELEASES` na release, o **update automático não funciona** para essa versão (o `update-electron-app` depende deles); avise isso explicitamente.
+   - Se não houver nenhum artefato, pare e relate, sem fazer push nem criar a release (o commit fica só local; informe o usuário).
 
 7. **Push** (só com o build OK): `git push origin main`.
 
-8. **Criar a release** com tag `vX.Y.Z` apontando para o commit pushado, notas geradas a partir dos commits desde a última tag e os artefatos anexados:
+8. **Criar a release** com tag `vX.Y.Z` apontando para o commit pushado, notas geradas a partir dos commits desde a última tag e os artefatos que existem anexados:
    ```
    gh release create vX.Y.Z --target main --title "vX.Y.Z" --generate-notes \
      out/make/squirrel.windows/x64/ChurchAdmin-X.Y.Z.Setup.exe \
@@ -56,9 +59,9 @@ Argumento opcional: `patch` (padrão), `minor`, `major` ou uma versão exata (`1
      out/make/squirrel.windows/x64/RELEASES \
      out/make/zip/win32/x64/ChurchAdmin-win32-x64-X.Y.Z.zip
    ```
-   Não é `prerelease` (o `forge.config.ts` publica com `prerelease: false`). Depois confirme com `gh release view vX.Y.Z --json assets -q '.assets[].name'` que os 4 arquivos foram anexados.
+   Passe só os arquivos que de fato existem (omita o `Setup.exe` e demais ausentes, ex.: build em macOS). Não é `prerelease` (o `forge.config.ts` publica com `prerelease: false`). Depois confirme com `gh release view vX.Y.Z --json assets -q '.assets[].name'` quais arquivos foram anexados.
 
-9. **Relatar**: versão anterior, nova versão, hash do commit e os artefatos anexados e a URL da release (`gh release view vX.Y.Z --json url -q .url`).
+9. **Relatar**: versão anterior, nova versão, hash do commit os artefatos anexados (e o que ficou de fora) e a URL da release (`gh release view vX.Y.Z --json url -q .url`).
 
 ## Observações
 

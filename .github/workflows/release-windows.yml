@@ -1,0 +1,59 @@
+name: Release Windows
+
+# Ao publicar uma release, gera os pacotes do Windows (Squirrel + zip) num runner
+# Windows e anexa à própria release. O RELEASES e o .nupkg são o que o
+# update-electron-app usa para o update automático.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da release (ex: v1.0.4)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Conferir versão do package.json com a tag
+        shell: bash
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          if [ "v$PKG" != "$TAG" ]; then
+            echo "package.json está em $PKG, mas a tag é $TAG" >&2
+            exit 1
+          fi
+
+      - run: yarn install --frozen-lockfile
+
+      - run: yarn make-win
+
+      - name: Listar artefatos
+        shell: bash
+        run: find out/make -type f
+
+      - name: Anexar artefatos à release
+        shell: bash
+        run: |
+          gh release upload "$TAG" \
+            out/make/squirrel.windows/x64/*.Setup.exe \
+            out/make/squirrel.windows/x64/*-full.nupkg \
+            out/make/squirrel.windows/x64/RELEASES \
+            out/make/zip/win32/x64/*.zip \
+            --clobber

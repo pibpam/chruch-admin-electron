@@ -119,12 +119,58 @@ function itemAlerta(mensagem: string): Record<string, unknown> {
   };
 }
 
+interface ISchedule {
+  media_playlist: { id: string }[];
+  metadata?: { event?: { id?: string } | null };
+}
+
 /**
- * Ver docs/integracao-holyrics.md seção 7. O Evento (holyricsEventId) nunca é recriado
- * depois da primeira vez — só a playlist é sempre apagada e reconstruída do zero a partir
- * do manifest atual (idempotente, único jeito confirmado como confiável: uma tentativa
- * anterior de fazer isso incrementalmente, só removendo/adicionando o que mudou, causou
- * itens duplicados na playlist em teste real — revertida).
+ * Lê a playlist de mídia de um evento específico sem mexer no culto selecionado na interface
+ * do Holyrics — GetMediaPlaylist não aceita event_id e só lê o que está selecionado, e
+ * SetCurrentSchedule não pode ser chamado na preparação (trocaria o culto em andamento).
+ * GetSchedules é por mês, então procura no mês do evento e, se não achar (evento criado sem
+ * datetime cai na data de criação), no mês atual.
+ */
+async function getEventMediaPlaylist(
+  client: HolyricsClient,
+  eventId: string,
+  eventDateTime: string,
+): Promise<{ id: string }[]> {
+  const [ano, mes] = eventDateTime.split('-').map(Number);
+  const agora = new Date();
+  const meses = [
+    { year: ano, month: mes },
+    { year: agora.getFullYear(), month: agora.getMonth() + 1 },
+  ].filter((m, i, arr) => m.year && m.month && arr.findIndex((o) => o.year === m.year && o.month === m.month) === i);
+
+  for (const { year, month } of meses) {
+    const schedules = await client.request<ISchedule[]>('GetSchedules', { month, year });
+    const schedule = schedules.find((s) => s.metadata?.event?.id === eventId);
+    if (schedule) return schedule.media_playlist ?? [];
+  }
+
+  throw new Error('Não foi possível encontrar o evento no Holyrics para atualizar a playlist.');
+}
+
+/**
+ * Antes da 2.26.0 o Holyrics ignora event_id em AddToPlaylist e edita
+ * a playlist selecionada na interface — ou seja, apagaria o culto que está no ar.
+ */
+async function garantirVersaoComEventId(client: HolyricsClient): Promise<void> {
+  const { version } = await client.request<{ version: string }>('GetVersion', {});
+  const [major = 0, minor = 0] = version.split('.').map((parte) => parseInt(parte, 10) || 0);
+  if (major < 2 || (major === 2 && minor < 26)) {
+    throw new Error(
+      `O Holyrics ${version} não permite preparar um culto sem tirar do ar o que está selecionado. Atualize para a versão 2.26.0 ou superior.`,
+    );
+  }
+}
+
+/**
+ * Ver docs/integracao-holyrics.md seção 7. A cada preparação um Evento novo é criado e a
+ * playlist é montada do zero a partir do manifest atual — o holyricsEventId anterior não é
+ * reaproveitado (uma tentativa anterior de atualizar a playlist incrementalmente, só
+ * removendo/adicionando o que mudou, causou itens duplicados em teste real — revertida).
  *
  * Ordem: `AddToPlaylist` é chamado com os itens em ordem INVERSA à do manifest. Isso é uma
  * correção empírica — a documentação da API (github.com/holyrics/API-Server) diz que os
@@ -145,17 +191,15 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
     );
   }
 
-  let holyricsEventId = params.holyricsEventId;
+  await garantirVersaoComEventId(client);
 
-  if (!holyricsEventId) {
-    const created = await client.request<{ id: string }>('CreateEvent', {
-      name: params.eventName,
-      // datetime: '2026-09-16 21:00:00',
-    });
-    holyricsEventId = created.id;
-  }
-
-  await client.request('SetCurrentSchedule', { event_id: holyricsEventId });
+  // Sempre cria um evento novo (playlist vazia) em vez de limpar a playlist do anterior —
+  // o id novo volta no resultado pra página persistir no lugar do antigo.
+  const created = await client.request<{ id: string }>('CreateEvent', {
+    name: params.eventName,
+    // datetime: '2026-09-16 21:00:00',
+  });
+  const holyricsEventId = created.id;
 
   const assetsByIndex = new Map(params.assets.map((asset) => [asset.index, asset]));
   const errosDownload = new Map<number, string>();
@@ -201,14 +245,6 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
     results.push({ index, status: 'ok' });
   }
 
-  const existentes = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
-  if (existentes.length > 0) {
-    await client.request('RemoveFromMediaPlaylist', {
-      ids: existentes.map((existente) => existente.id),
-      event_id: holyricsEventId,
-    });
-  }
-
   // resolvedIndexes: índices (em params.manifest) dos itens que entram na playlist, na ordem
   // do manifest. sendOrderIndexes: mesma coisa, mas na ordem em que são de fato enviados pro
   // Holyrics (invertida — ver comentário da função).
@@ -221,9 +257,16 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
   }
 
   // Snapshot pra lastPreparedManifest — não usado hoje pra decidir nada (preparação incremental
-  // foi revertida), mas mantido pra eventual uso futuro. Casa GetMediaPlaylist com a ordem em
+  // foi revertida), mas mantido pra eventual uso futuro. Casa a playlist do evento com a ordem em
   // que os itens foram efetivamente enviados (sendOrderIndexes), não a ordem do manifest.
-  const playlistDepois = await client.request<{ id: string }[]>('GetMediaPlaylist', {});
+  // Snapshot é best-effort: se não achar o evento, salva sem holyricsItemId em vez de falhar
+  // uma preparação que já foi concluída.
+  const playlistDepois = await getEventMediaPlaylist(client, holyricsEventId, params.eventDateTime).catch(
+    (err): { id: string }[] => {
+      console.error('Falha ao ler a playlist após preparar:', err);
+      return [];
+    },
+  );
   const holyricsIdByIndex = new Map<number, string>();
   sendOrderIndexes.forEach((index, position) => {
     const entry = playlistDepois[position];
@@ -234,6 +277,19 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
     const holyricsItemId = holyricsIdByIndex.get(index);
     return holyricsItemId ? { ...item, holyricsItemId } : { ...item };
   });
+
+  // Só no fim, com a playlist já montada: deixa o evento preparado selecionado na interface.
+  // Não pode ir antes — durante a montagem o culto selecionado não deve mudar.
+  await client.request('SetCurrentSchedule', { event_id: holyricsEventId });
+
+  // Apaga o evento da preparação anterior só depois do novo estar montado e selecionado —
+  // assim nunca se apaga o que está selecionado. Best-effort: se falhar, o novo já está pronto
+  // e o antigo só fica sobrando no Holyrics.
+  if (params.holyricsEventId && params.holyricsEventId !== holyricsEventId) {
+    await client.request('DeleteEvent', { id: params.holyricsEventId }).catch((err) => {
+      console.error('Falha ao apagar o evento anterior no Holyrics:', err);
+    });
+  }
 
   return { holyricsEventId, items: results, preparedManifest };
 }

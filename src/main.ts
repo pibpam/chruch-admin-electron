@@ -6,7 +6,6 @@ import { updateElectronApp } from 'update-electron-app';
 import { state } from './state';
 import { carregarCatalogoDeUrls, sincronizarCatalogo } from './holyrics/catalog';
 import { prepararEvento } from './holyrics/prepare';
-import { executarEvento } from './holyrics/execute';
 import { statusConexao } from './holyrics/healthcheck';
 import { criarMusicasPendentes } from './holyrics/pendingSongs';
 import {
@@ -28,7 +27,7 @@ updateElectronApp({ repo: 'pibpam/chruch-admin-electron' });
 /**
  * O Electron não hospeda UI própria — a janela carrega a página do admin web
  * (sys-church-fornt), que detecta window.holyricsBridge pra mostrar os
- * controles de Preparar/Executar/Sincronizar (ver docs/integracao-holyrics.md
+ * controles de Preparar/Sincronizar (ver docs/integracao-holyrics.md
  * seção 2). Em dev aponta pro Vite local; em produção, pro domínio publicado.
  */
 const ADMIN_WEB_URL = process.env.ADMIN_WEB_URL || 'https://admin.pibpam.org';
@@ -67,10 +66,6 @@ ipcMain.handle('holyrics:sincronizar-catalogo', async (_event, urls: ICatalogUrl
 
 ipcMain.handle('holyrics:preparar', async (_event, params: IPrepararEventoParams) => {
   return prepararEvento(params);
-});
-
-ipcMain.handle('holyrics:executar', async (_event, eventId: string) => {
-  return executarEvento(eventId);
 });
 
 ipcMain.handle('holyrics:criar-pendentes', async (_event, pendentes: IPendingSong[]) => {

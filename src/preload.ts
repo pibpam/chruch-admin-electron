@@ -24,9 +24,6 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
   prepararEvento: (params: IPrepararEventoParams): Promise<IPrepararEventoResult> =>
     ipcRenderer.invoke('holyrics:preparar', params),
 
-  executarEvento: (eventId: string): Promise<{ status: string }> =>
-    ipcRenderer.invoke('holyrics:executar', eventId),
-
   criarMusicasPendentes: (pendentes: IPendingSong[]): Promise<ICriarMusicaPendenteResult[]> =>
     ipcRenderer.invoke('holyrics:criar-pendentes', pendentes),
 

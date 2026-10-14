@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           gh release upload "$TAG" \
-            out/make/squirrel.windows/x64/*.Setup.exe \
+            out/make/squirrel.windows/x64/*Setup.exe \
             out/make/squirrel.windows/x64/*-full.nupkg \
             out/make/squirrel.windows/x64/RELEASES \
             out/make/zip/win32/x64/*.zip \

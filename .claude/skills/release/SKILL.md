@@ -5,7 +5,7 @@ description: Publica uma nova versão do ChurchAdmin — confere a última relea
 
 # Release
 
-Fluxo: verificar release atual → alterar `version` → commit → build dos pacotes → push → criar release com os artefatos anexados.
+Fluxo: verificar release atual → alterar `version` → commit → push → criar release → o workflow `.github/workflows/release-windows.yml` builda no Windows e anexa os artefatos.
 
 Argumento opcional: `patch` (padrão), `minor`, `major` ou uma versão exata (`1.2.0`).
 
@@ -33,37 +33,25 @@ Argumento opcional: `patch` (padrão), `minor`, `major` ou uma versão exata (`1
    ```
    Termine a mensagem com a linha de atribuição indicada pelo sistema (Co-Authored-By), se houver.
 
-6. **Build dos pacotes** (depois do commit do bump, antes do push, para o instalador sair com a versão nova e nada ser publicado se o build quebrar):
-   ```
-   rm -rf out/make
-   yarn make-win
-   ```
-   Isso gera, em `out/make/`, os artefatos do Windows x64 (padrão das releases anteriores):
-   - `squirrel.windows/x64/ChurchAdmin-X.Y.Z.Setup.exe`
-   - `squirrel.windows/x64/church_admin_electron-X.Y.Z-full.nupkg`
-   - `squirrel.windows/x64/RELEASES`
-   - `zip/win32/x64/ChurchAdmin-win32-x64-X.Y.Z.zip`
+6. **Push**: `git push origin main`. A tag da release precisa apontar para um commit cujo `package.json` já está na versão nova (o workflow falha se a versão e a tag divergirem).
 
-   Confira com `find out/make -type f` o que foi gerado e se os nomes contêm a versão nova. Os artefatos do Squirrel (`Setup.exe`, `.nupkg`, `RELEASES`) precisam de Wine/Mono fora do Windows; em macOS/Linux sem eles o maker pode não gerar nada ou falhar.
-   - Se `yarn make-win` falhar, mas o `.zip` existir (ou o usuário mandar seguir), siga **sem o `Setup.exe`** (e sem o que não foi gerado) e avise o usuário do que ficou de fora.
-   - Sem `.nupkg` + `RELEASES` na release, o **update automático não funciona** para essa versão (o `update-electron-app` depende deles); avise isso explicitamente.
-   - Se não houver nenhum artefato, pare e relate, sem fazer push nem criar a release (o commit fica só local; informe o usuário).
-
-7. **Push** (só com o build OK): `git push origin main`.
-
-8. **Criar a release** com tag `vX.Y.Z` apontando para o commit pushado, notas geradas a partir dos commits desde a última tag e os artefatos que existem anexados:
+7. **Criar a release** com tag `vX.Y.Z` e notas geradas a partir dos commits desde a última tag. Não anexe arquivos aqui: o build roda no GitHub Actions (runner Windows), porque o maker Squirrel (`Setup.exe`, `.nupkg`, `RELEASES`) não roda no macOS sem Wine/Mono.
    ```
-   gh release create vX.Y.Z --target main --title "vX.Y.Z" --generate-notes \
-     out/make/squirrel.windows/x64/ChurchAdmin-X.Y.Z.Setup.exe \
-     out/make/squirrel.windows/x64/church_admin_electron-X.Y.Z-full.nupkg \
-     out/make/squirrel.windows/x64/RELEASES \
-     out/make/zip/win32/x64/ChurchAdmin-win32-x64-X.Y.Z.zip
+   gh release create vX.Y.Z --target main --title "vX.Y.Z" --generate-notes
    ```
-   Passe só os arquivos que de fato existem (omita o `Setup.exe` e demais ausentes, ex.: build em macOS). Não é `prerelease` (o `forge.config.ts` publica com `prerelease: false`). Depois confirme com `gh release view vX.Y.Z --json assets -q '.assets[].name'` quais arquivos foram anexados.
+   Não é `prerelease`. Publicar a release dispara o workflow.
 
-9. **Relatar**: versão anterior, nova versão, hash do commit os artefatos anexados (e o que ficou de fora) e a URL da release (`gh release view vX.Y.Z --json url -q .url`).
+8. **Acompanhar o workflow e conferir os artefatos**
+   ```
+   gh run list --workflow release-windows.yml --limit 1
+   gh run watch <id> --exit-status
+   gh release view vX.Y.Z --json assets -q '.assets[].name'
+   ```
+   Devem aparecer `ChurchAdmin-X.Y.Z.Setup.exe`, `church_admin_electron-X.Y.Z-full.nupkg`, `RELEASES` e `ChurchAdmin-win32-x64-X.Y.Z.zip`. Sem o `.nupkg` e o `RELEASES` o update automático não funciona. Se o workflow falhar, mostre o motivo (`gh run view <id> --log-failed`) e avise o usuário; a release fica sem artefatos. Para refazer: corrija e rode `gh workflow run release-windows.yml -f tag=vX.Y.Z`.
+
+9. **Relatar**: versão anterior, nova versão, hash do commit, resultado do workflow, artefatos anexados (e o que ficou de fora) e a URL da release (`gh release view vX.Y.Z --json url -q .url`).
 
 ## Observações
 
-- Não use `yarn publish` (electron-forge): a release é criada pelo `gh` com os artefatos do `make-win`.
+- Não use `yarn publish` (electron-forge) nem rode `make-win` local: o build oficial é o do workflow.
 - Se algum passo falhar, pare e relate; não use `--force` nem apague tags sem pedido explícito.

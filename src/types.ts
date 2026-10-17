@@ -123,3 +123,17 @@ export interface IHealthcheckResult {
   apiEnabledLocal?: boolean;
   error?: string;
 }
+
+/**
+ * Preparação que o processo principal está rodando (ou acabou de rodar) — sobrevive a um reload
+ * da página, que usa isso pra se reconectar ao log e registrar o resultado no sistema.
+ */
+export interface IPreparacaoStatus {
+  planUuid: string;
+  startedAt: number;
+  status: 'running' | 'done' | 'error';
+  /** Último estado de cada passo (por key), na ordem em que apareceram. */
+  progresso: IPrepararProgresso[];
+  result?: IPrepararEventoResult;
+  error?: string;
+}

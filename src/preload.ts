@@ -8,6 +8,7 @@ import {
   IPrepararEventoParams,
   IPrepararEventoResult,
   IPrepararProgresso,
+  IPreparacaoStatus,
 } from './types';
 
 /**
@@ -31,6 +32,13 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
     ipcRenderer.on('holyrics:preparar:progresso', listener);
     return () => ipcRenderer.removeListener('holyrics:preparar:progresso', listener);
   },
+
+  /** Preparação em andamento/terminada no processo principal — sobrevive a reload da página. */
+  statusPreparacao: (): Promise<IPreparacaoStatus | null> => ipcRenderer.invoke('holyrics:preparar:status'),
+
+  aguardarPreparacao: (): Promise<IPrepararEventoResult> => ipcRenderer.invoke('holyrics:preparar:aguardar'),
+
+  descartarPreparacao: (planUuid: string): Promise<void> => ipcRenderer.invoke('holyrics:preparar:descartar', planUuid),
 
   criarMusicasPendentes: (pendentes: IPendingSong[]): Promise<ICriarMusicaPendenteResult[]> =>
     ipcRenderer.invoke('holyrics:criar-pendentes', pendentes),

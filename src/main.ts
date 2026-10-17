@@ -5,7 +5,12 @@ import { updateElectronApp } from 'update-electron-app';
 
 import { state } from './state';
 import { carregarCatalogoDeUrls, sincronizarCatalogo } from './holyrics/catalog';
-import { prepararEvento } from './holyrics/prepare';
+import {
+  aguardarPreparacao,
+  descartarPreparacao,
+  iniciarPreparacao,
+  statusPreparacao,
+} from './holyrics/preparacaoAtual';
 import { statusConexao } from './holyrics/healthcheck';
 import { criarMusicasPendentes } from './holyrics/pendingSongs';
 import { criarBandeja, mostrar } from './tray';
@@ -145,11 +150,12 @@ ipcMain.handle('holyrics:sincronizar-catalogo', async (_event, urls: ICatalogUrl
   return sincronizarCatalogo(urls);
 });
 
-ipcMain.handle('holyrics:preparar', async (event, params: IPrepararEventoParams) => {
-  return prepararEvento(params, (progresso) => {
-    if (!event.sender.isDestroyed()) event.sender.send('holyrics:preparar:progresso', progresso);
-  });
-});
+ipcMain.handle('holyrics:preparar', async (_event, params: IPrepararEventoParams) => iniciarPreparacao(params));
+
+// Reconexão depois de um reload da página no meio da preparação (ver preparacaoAtual.ts).
+ipcMain.handle('holyrics:preparar:status', () => statusPreparacao());
+ipcMain.handle('holyrics:preparar:aguardar', () => aguardarPreparacao());
+ipcMain.handle('holyrics:preparar:descartar', (_event, planUuid: string) => descartarPreparacao(planUuid));
 
 ipcMain.handle('holyrics:criar-pendentes', async (_event, pendentes: IPendingSong[]) => {
   return criarMusicasPendentes(pendentes);

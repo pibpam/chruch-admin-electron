@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { updateElectronApp } from 'update-electron-app';
@@ -31,6 +31,32 @@ updateElectronApp({ repo: 'pibpam/chruch-admin-electron' });
  * seção 2). Em dev aponta pro Vite local; em produção, pro domínio publicado.
  */
 const ADMIN_WEB_URL = process.env.ADMIN_WEB_URL || 'https://admin.pibpam.org';
+
+/**
+ * A página vem do S3 e o Chromium guarda index.html/assets em cache (inclusive por
+ * heurística, quando o S3 não manda Cache-Control), então um deploy novo só aparecia
+ * depois de limpar o cache na mão. Ao abrir o app, descarta o cache HTTP, service
+ * workers e Cache Storage — cookies e localStorage ficam, pra não perder o login — e
+ * marca toda resposta do domínio do admin como no-store, pra reload também buscar de novo.
+ */
+const ignorarCacheDaPagina = async () => {
+  const { origin } = new URL(ADMIN_WEB_URL);
+
+  await session.defaultSession.clearCache();
+  await session.defaultSession.clearStorageData({
+    storages: ['serviceworkers', 'cachestorage'],
+  });
+
+  session.defaultSession.webRequest.onHeadersReceived({ urls: [`${origin}/*`] }, (details, callback) => {
+    const headers = Object.fromEntries(
+      Object.entries(details.responseHeaders ?? {}).filter(
+        ([nome]) => !['cache-control', 'expires', 'etag', 'last-modified'].includes(nome.toLowerCase()),
+      ),
+    );
+    headers['Cache-Control'] = ['no-store'];
+    callback({ responseHeaders: headers });
+  });
+};
 
 const createWindow = () => {
   const mainWindow = new BrowserWindow({
@@ -83,7 +109,10 @@ ipcMain.handle('app:versao', () => app.getVersion());
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.on('ready', createWindow);
+app.on('ready', async () => {
+  await ignorarCacheDaPagina();
+  createWindow();
+});
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

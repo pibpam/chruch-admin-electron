@@ -12,6 +12,8 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: "./assets/icon",
+    // Ícones da bandeja, lidos em runtime de process.resourcesPath (ver src/tray.ts).
+    extraResource: ["./assets/icon.ico", "./assets/icon.png"],
   },
   rebuildConfig: {},
   makers: [

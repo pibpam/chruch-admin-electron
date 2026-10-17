@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, autoUpdater, BrowserWindow, ipcMain, Menu, session } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { updateElectronApp } from 'update-electron-app';
@@ -8,6 +8,7 @@ import { carregarCatalogoDeUrls, sincronizarCatalogo } from './holyrics/catalog'
 import { prepararEvento } from './holyrics/prepare';
 import { statusConexao } from './holyrics/healthcheck';
 import { criarMusicasPendentes } from './holyrics/pendingSongs';
+import { criarBandeja, mostrar } from './tray';
 import {
   ICatalogUrls,
   IConfigurarIntegracaoParams,
@@ -15,10 +16,52 @@ import {
   IPrepararEventoParams,
 } from './types';
 
+// Abre a janela escondida (só na bandeja) — usado quando o app sobe junto com o Windows.
+const ARG_OCULTO = '--oculto';
+// Pede pra instância que já está rodando encerrar — usado pela tarefa da barra de tarefas.
+const ARG_ENCERRAR = '--encerrar';
+
+/**
+ * No Windows (Squirrel) o login item precisa apontar pro launcher da raiz
+ * (%LocalAppData%\ChurchAdmin\ChurchAdmin.exe), que repassa os argumentos pra versão
+ * atual; o process.execPath fica em app-x.y.z e muda a cada update.
+ */
+const loginItemPath = () =>
+  process.platform === 'win32'
+    ? { path: path.resolve(path.dirname(process.execPath), '..', path.basename(process.execPath)) }
+    : {};
+
+// Ao desinstalar, tira o app da inicialização do Windows.
+if (process.argv.includes('--squirrel-uninstall')) {
+  app.setLoginItemSettings({ openAtLogin: false, ...loginItemPath() });
+}
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
   app.quit();
 }
+
+// Uma instância só: abrir de novo (atalho, login, tarefa da barra) fala com a que já roda.
+const instanciaUnica = app.requestSingleInstanceLock();
+if (!instanciaUnica) {
+  app.quit();
+}
+
+let mainWindow: BrowserWindow | null = null;
+
+// Fechar a janela só esconde pra bandeja; o app sai de verdade só quando isso é true.
+let encerrando = false;
+const encerrar = () => {
+  encerrando = true;
+  app.quit();
+};
+app.on('before-quit', () => {
+  encerrando = true;
+});
+// O update automático fecha as janelas antes do before-quit, então marca aqui também.
+autoUpdater.on('before-quit-for-update', () => {
+  encerrando = true;
+});
 
 // No-op em dev (app.isPackaged === false); em produção checa releases
 // públicas do GitHub e aplica o update automaticamente.
@@ -58,15 +101,27 @@ const ignorarCacheDaPagina = async () => {
   });
 };
 
-const createWindow = () => {
-  const mainWindow = new BrowserWindow({
+const createWindow = (oculta: boolean) => {
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    show: !oculta,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // A página continua chamando o Holyrics com a janela escondida na bandeja.
+      backgroundThrottling: false,
     },
+  });
+
+  mainWindow.on('close', (event) => {
+    if (encerrando) return;
+    event.preventDefault();
+    mainWindow?.hide();
+  });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 
   mainWindow.loadURL(ADMIN_WEB_URL);
@@ -106,27 +161,72 @@ ipcMain.handle('holyrics:healthcheck', async () => statusConexao());
 // conseguir mostrar qual build está rodando no computador da igreja (ver auto-update).
 ipcMain.handle('app:versao', () => app.getVersion());
 
+const criarMenu = () => {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Arquivo',
+        submenu: [
+          { label: 'Fechar janela', accelerator: 'CmdOrCtrl+W', click: () => mainWindow?.hide() },
+          { type: 'separator' },
+          { label: 'Encerrar', accelerator: 'CmdOrCtrl+Q', click: encerrar },
+        ],
+      },
+      { role: 'editMenu', label: 'Editar' },
+      { role: 'viewMenu', label: 'Exibir' },
+    ]),
+  );
+};
+
+// Botão direito no ícone da barra de tarefas do Windows → "Encerrar ChurchAdmin".
+// Abre uma segunda instância com --encerrar, que cai no second-instance abaixo.
+const criarTarefasDaBarra = () => {
+  if (process.platform !== 'win32') return;
+  app.setUserTasks([
+    {
+      program: process.execPath,
+      arguments: ARG_ENCERRAR,
+      iconPath: process.execPath,
+      iconIndex: 0,
+      title: 'Encerrar ChurchAdmin',
+      description: 'Fecha o ChurchAdmin, inclusive da bandeja',
+    },
+  ]);
+};
+
+app.on('second-instance', (_event, argv) => {
+  if (argv.includes(ARG_ENCERRAR)) encerrar();
+  else mostrar(mainWindow);
+});
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', async () => {
+  if (started || !instanciaUnica) return;
+  // Pediu pra encerrar mas não havia nada rodando: não abre nada.
+  if (process.argv.includes(ARG_ENCERRAR)) {
+    app.quit();
+    return;
+  }
+
+  // Sobe junto com o sistema, já escondido na bandeja. Em dev não mexe no login.
+  if (app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin: true, args: [ARG_OCULTO], ...loginItemPath() });
+  }
+
+  criarMenu();
+  criarTarefasDaBarra();
+  criarBandeja(() => mostrar(mainWindow), encerrar);
+
   await ignorarCacheDaPagina();
-  createWindow();
+  createWindow(process.argv.includes(ARG_OCULTO));
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+// O app vive na bandeja: sem janela visível ele continua rodando até "Encerrar".
+app.on('window-all-closed', () => undefined);
 
 app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+  if (mainWindow) mostrar(mainWindow);
+  else createWindow(false);
 });

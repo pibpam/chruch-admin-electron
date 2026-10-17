@@ -46,4 +46,6 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
   statusConexao: (): Promise<IHealthcheckResult> => ipcRenderer.invoke('holyrics:healthcheck'),
 
   getVersaoApp: (): Promise<string> => ipcRenderer.invoke('app:versao'),
+
+  getNomeComputador: (): Promise<string> => ipcRenderer.invoke('app:nome-computador'),
 });

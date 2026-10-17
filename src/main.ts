@@ -1,4 +1,5 @@
 import { app, autoUpdater, BrowserWindow, ipcMain, Menu, session } from 'electron';
+import os from 'node:os';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { updateElectronApp } from 'update-electron-app';
@@ -166,6 +167,9 @@ ipcMain.handle('holyrics:healthcheck', async () => statusConexao());
 // Versão do próprio app (package.json, via Electron), não do Holyrics — pra página web
 // conseguir mostrar qual build está rodando no computador da igreja (ver auto-update).
 ipcMain.handle('app:versao', () => app.getVersion());
+
+// Nome do computador — identifica este app na lista da preparação remota do admin web.
+ipcMain.handle('app:nome-computador', () => os.hostname());
 
 const criarMenu = () => {
   Menu.setApplicationMenu(

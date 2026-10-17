@@ -64,8 +64,10 @@ ipcMain.handle('holyrics:sincronizar-catalogo', async (_event, urls: ICatalogUrl
   return sincronizarCatalogo(urls);
 });
 
-ipcMain.handle('holyrics:preparar', async (_event, params: IPrepararEventoParams) => {
-  return prepararEvento(params);
+ipcMain.handle('holyrics:preparar', async (event, params: IPrepararEventoParams) => {
+  return prepararEvento(params, (progresso) => {
+    if (!event.sender.isDestroyed()) event.sender.send('holyrics:preparar:progresso', progresso);
+  });
 });
 
 ipcMain.handle('holyrics:criar-pendentes', async (_event, pendentes: IPendingSong[]) => {

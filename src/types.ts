@@ -91,6 +91,19 @@ export interface IPrepararEventoResult {
   preparedManifest: IPreparedManifestItem[];
 }
 
+/**
+ * Passo da preparação reportado em tempo real pra página (canal 'holyrics:preparar:progresso').
+ * Mesmo `key` = mesma linha do log na tela (running → done/error/warning); `sub` indenta como
+ * detalhe do passo anterior (ex.: um arquivo dentro de "Baixando arquivos").
+ */
+export interface IPrepararProgresso {
+  key: string;
+  status: 'running' | 'done' | 'warning' | 'error';
+  label: string;
+  detail?: string;
+  sub?: boolean;
+}
+
 export interface IPendingSong {
   musica_id: string;
   titulo: string;

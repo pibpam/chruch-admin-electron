@@ -9,6 +9,7 @@ import {
   IPrepararEventoItemResult,
   IPrepararEventoParams,
   IPrepararEventoResult,
+  IPrepararProgresso,
 } from '../types';
 
 /**
@@ -16,7 +17,7 @@ import {
  * ver mediaPaths.ts), rebaixando só se o etag mudou desde a última vez — o
  * etag conhecido fica num arquivo .etag ao lado do arquivo baixado.
  */
-async function baixarAsset(item: IManifestItem, asset?: IManifestAsset): Promise<void> {
+async function baixarAsset(item: IManifestItem, asset?: IManifestAsset): Promise<'baixado' | 'em-cache'> {
   if (!asset?.metadata) {
     throw new Error(`O arquivo "${item.arquivo}" não foi encontrado. Reanexe-o na tela do plano.`);
   }
@@ -26,17 +27,24 @@ async function baixarAsset(item: IManifestItem, asset?: IManifestAsset): Promise
   const etagConhecido = await fs.readFile(etagFile, 'utf8').catch((): null => null);
 
   if (etagConhecido === asset.metadata.etag && (await fileExists(filePath))) {
-    return;
+    return 'em-cache';
   }
 
-  const response = await fetch(asset.metadata.url);
+  const response = await fetch(asset.metadata.url).catch((err) => {
+    console.error(`Falha de rede ao baixar "${item.arquivo}":`, err);
+    throw new Error(`Sem conexão com a internet para baixar o arquivo "${item.arquivo}".`);
+  });
   if (!response.ok) {
     console.error(`Falha ao baixar "${item.arquivo}" (HTTP ${response.status})`);
     throw new Error(`Não foi possível baixar o arquivo "${item.arquivo}".`);
   }
   const buffer = Buffer.from(await response.arrayBuffer());
-  await fs.writeFile(filePath, buffer);
+  await fs.writeFile(filePath, buffer).catch((err) => {
+    console.error(`Falha ao gravar "${filePath}":`, err);
+    throw new Error(`Não foi possível salvar "${item.arquivo}" na pasta de mídia do Holyrics (${filePath}). Verifique o espaço em disco e as permissões da pasta.`);
+  });
   await fs.writeFile(etagFile, asset.metadata.etag);
+  return 'baixado';
 }
 
 /**
@@ -179,39 +187,103 @@ async function garantirVersaoComEventId(client: HolyricsClient): Promise<void> {
  * no Holyrics saía invertida enviando na ordem direta. Se isso for corrigido/mudar do lado
  * do Holyrics no futuro, ajustar aqui.
  */
-export async function prepararEvento(params: IPrepararEventoParams): Promise<IPrepararEventoResult> {
-  const client = new HolyricsClient(state.requireConnection());
-
-  const pendencias = params.manifest.filter(
-    (item) => item.type === 'song' && item.musica_id && !item.song_id,
-  );
-  if (pendencias.length > 0) {
-    throw new Error(
-      'Este plano tem letra(s) nova(s) que ainda não foram criadas no Holyrics. Crie-as na tela de Músicas Pendentes antes de preparar.',
-    );
+export async function prepararEvento(
+  params: IPrepararEventoParams,
+  onProgresso: (progresso: IPrepararProgresso) => void = () => undefined,
+): Promise<IPrepararEventoResult> {
+  /** Roda um passo reportando running → done/error. Erro é repassado com a mesma mensagem. */
+  async function etapa<T>(key: string, label: string, fn: () => Promise<T>, detalheOk?: (r: T) => string): Promise<T> {
+    onProgresso({ key, status: 'running', label });
+    try {
+      const resultado = await fn();
+      onProgresso({ key, status: 'done', label, detail: detalheOk?.(resultado) });
+      return resultado;
+    } catch (err) {
+      onProgresso({ key, status: 'error', label, detail: (err as Error).message });
+      throw err;
+    }
   }
 
-  await garantirVersaoComEventId(client);
+  const client = new HolyricsClient(state.requireConnection());
+
+  await etapa('pendencias', 'Conferindo músicas novas', async () => {
+    const pendencias = params.manifest.filter(
+      (item) => !item.hidden && item.type === 'song' && item.musica_id && !item.song_id,
+    );
+    if (pendencias.length > 0) {
+      throw new Error(
+        `${pendencias.length} letra(s) nova(s) ainda não foram criadas no Holyrics. Crie-as na tela de Músicas Pendentes antes de preparar.`,
+      );
+    }
+  });
+
+  await etapa('versao', 'Verificando a versão do Holyrics', () => garantirVersaoComEventId(client), () => 'Compatível');
 
   // Sempre cria um evento novo (playlist vazia) em vez de limpar a playlist do anterior —
   // o id novo volta no resultado pra página persistir no lugar do antigo.
-  const created = await client.request<{ id: string }>('CreateEvent', {
-    name: params.eventName,
-    // datetime: '2026-09-16 21:00:00',
-  });
+  const created = await etapa(
+    'evento',
+    'Criando o culto no Holyrics',
+    () =>
+      client.request<{ id: string }>('CreateEvent', {
+        name: params.eventName,
+        // datetime: '2026-09-16 21:00:00',
+      }),
+    () => params.eventName,
+  );
   const holyricsEventId = created.id;
 
   const assetsByIndex = new Map(params.assets.map((asset) => [asset.index, asset]));
   const errosDownload = new Map<number, string>();
 
-  for (let index = 0; index < params.manifest.length; index++) {
-    const item = params.manifest[index];
-    if (item.hidden || !item.arquivo) continue;
-    try {
-      await baixarAsset(item, assetsByIndex.get(index));
-    } catch (err) {
-      errosDownload.set(index, (err as Error).message);
+  const comArquivo = params.manifest
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !item.hidden && item.arquivo);
+
+  if (comArquivo.length > 0) {
+    const labelDownload = 'Baixando arquivos de mídia';
+    onProgresso({ key: 'downloads', status: 'running', label: labelDownload, detail: `0 de ${comArquivo.length}` });
+    let baixados = 0;
+    let emCache = 0;
+    for (let posicao = 0; posicao < comArquivo.length; posicao++) {
+      const { item, index } = comArquivo[posicao];
+      const key = `download:${index}`;
+      onProgresso({
+        key: 'downloads',
+        status: 'running',
+        label: labelDownload,
+        detail: `${posicao + 1} de ${comArquivo.length} · ${item.arquivo}`,
+      });
+      onProgresso({ key, status: 'running', label: item.arquivo as string, sub: true });
+      try {
+        const resultado = await baixarAsset(item, assetsByIndex.get(index));
+        if (resultado === 'baixado') baixados++;
+        else emCache++;
+        onProgresso({
+          key,
+          status: 'done',
+          label: item.arquivo as string,
+          detail: resultado === 'baixado' ? 'Baixado' : 'Já estava atualizado no computador',
+          sub: true,
+        });
+      } catch (err) {
+        errosDownload.set(index, (err as Error).message);
+        onProgresso({ key, status: 'error', label: item.arquivo as string, detail: (err as Error).message, sub: true });
+      }
     }
+    const resumo = [
+      baixados ? `${baixados} baixado(s)` : '',
+      emCache ? `${emCache} já atualizado(s)` : '',
+      errosDownload.size ? `${errosDownload.size} com falha` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    onProgresso({
+      key: 'downloads',
+      status: errosDownload.size ? 'warning' : 'done',
+      label: labelDownload,
+      detail: resumo,
+    });
   }
 
   const results: IPrepararEventoItemResult[] = [];
@@ -253,7 +325,14 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
 
   if (sendOrderIndexes.length > 0) {
     const itemsToAdd = sendOrderIndexes.map((index) => resolved[index] as Record<string, unknown>);
-    await client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId });
+    const comAlerta = results.filter((r) => r.status === 'error').length;
+    await etapa(
+      'playlist',
+      'Montando a playlist do culto',
+      () => client.request('AddToPlaylist', { items: itemsToAdd, event_id: holyricsEventId }),
+      () =>
+        `${itemsToAdd.length} item(ns) enviados` + (comAlerta ? ` · ${comAlerta} como alerta de item faltando` : ''),
+    );
   }
 
   // Snapshot pra lastPreparedManifest — não usado hoje pra decidir nada (preparação incremental
@@ -280,15 +359,28 @@ export async function prepararEvento(params: IPrepararEventoParams): Promise<IPr
 
   // Só no fim, com a playlist já montada: deixa o evento preparado selecionado na interface.
   // Não pode ir antes — durante a montagem o culto selecionado não deve mudar.
-  await client.request('SetCurrentSchedule', { event_id: holyricsEventId });
+  await etapa('selecionar', 'Selecionando o culto na tela do Holyrics', () =>
+    client.request('SetCurrentSchedule', { event_id: holyricsEventId }),
+  );
 
   // Apaga o evento da preparação anterior só depois do novo estar montado e selecionado —
   // assim nunca se apaga o que está selecionado. Best-effort: se falhar, o novo já está pronto
   // e o antigo só fica sobrando no Holyrics.
   if (params.holyricsEventId && params.holyricsEventId !== holyricsEventId) {
-    await client.request('DeleteEvent', { id: params.holyricsEventId }).catch((err) => {
-      console.error('Falha ao apagar o evento anterior no Holyrics:', err);
-    });
+    const label = 'Removendo a preparação anterior';
+    onProgresso({ key: 'limpeza', status: 'running', label });
+    await client
+      .request('DeleteEvent', { id: params.holyricsEventId })
+      .then(() => onProgresso({ key: 'limpeza', status: 'done', label }))
+      .catch((err) => {
+        console.error('Falha ao apagar o evento anterior no Holyrics:', err);
+        onProgresso({
+          key: 'limpeza',
+          status: 'warning',
+          label,
+          detail: 'O culto antigo continua na lista do Holyrics — pode ser apagado manualmente.',
+        });
+      });
   }
 
   return { holyricsEventId, items: results, preparedManifest };

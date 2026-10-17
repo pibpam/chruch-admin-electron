@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import {
   IConfigurarIntegracaoParams,
   ICatalogUrls,
@@ -7,6 +7,7 @@ import {
   IPendingSong,
   IPrepararEventoParams,
   IPrepararEventoResult,
+  IPrepararProgresso,
 } from './types';
 
 /**
@@ -23,6 +24,13 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
 
   prepararEvento: (params: IPrepararEventoParams): Promise<IPrepararEventoResult> =>
     ipcRenderer.invoke('holyrics:preparar', params),
+
+  /** Passos da preparação em tempo real — devolve a função pra parar de escutar. */
+  onPrepararProgresso: (callback: (progresso: IPrepararProgresso) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, progresso: IPrepararProgresso) => callback(progresso);
+    ipcRenderer.on('holyrics:preparar:progresso', listener);
+    return () => ipcRenderer.removeListener('holyrics:preparar:progresso', listener);
+  },
 
   criarMusicasPendentes: (pendentes: IPendingSong[]): Promise<ICriarMusicaPendenteResult[]> =>
     ipcRenderer.invoke('holyrics:criar-pendentes', pendentes),

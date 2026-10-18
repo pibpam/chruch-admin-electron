@@ -4,6 +4,8 @@ import {
   ICatalogUrls,
   ICriarMusicaPendenteResult,
   IEditarMusicaParams,
+  IExecutarItemParams,
+  IExecutarItemResult,
   IHealthcheckResult,
   IPendingSong,
   IPrepararEventoParams,
@@ -47,6 +49,11 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
   /** Aplica no Holyrics a edição pendente de uma música que já existe (EditSong). */
   editarMusica: (edicao: IEditarMusicaParams): Promise<{ status: string }> =>
     ipcRenderer.invoke('holyrics:editar-musica', edicao),
+
+  /** Executa um item da playlist do culto selecionado no Holyrics (MediaPlaylistAction). Recusa se o
+   * culto selecionado não for o do plano — nunca troca a seleção. */
+  executarItem: (params: IExecutarItemParams): Promise<IExecutarItemResult> =>
+    ipcRenderer.invoke('holyrics:executar-item', params),
 
   statusConexao: (): Promise<IHealthcheckResult> => ipcRenderer.invoke('holyrics:healthcheck'),
 

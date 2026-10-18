@@ -14,11 +14,13 @@ import {
 } from './holyrics/preparacaoAtual';
 import { statusConexao } from './holyrics/healthcheck';
 import { criarMusicasPendentes, editarMusica } from './holyrics/pendingSongs';
+import { executarItem } from './holyrics/executeItem';
 import { criarBandeja, mostrar } from './tray';
 import {
   ICatalogUrls,
   IConfigurarIntegracaoParams,
   IEditarMusicaParams,
+  IExecutarItemParams,
   IPendingSong,
   IPrepararEventoParams,
 } from './types';
@@ -210,6 +212,8 @@ ipcMain.handle('holyrics:criar-pendentes', async (_event, pendentes: IPendingSon
 });
 
 ipcMain.handle('holyrics:editar-musica', async (_event, edicao: IEditarMusicaParams) => editarMusica(edicao));
+
+ipcMain.handle('holyrics:executar-item', (_event, params: IExecutarItemParams) => executarItem(params));
 
 ipcMain.handle('holyrics:healthcheck', async () => statusConexao());
 

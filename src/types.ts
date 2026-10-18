@@ -145,3 +145,16 @@ export interface IPreparacaoStatus {
   result?: IPrepararEventoResult;
   error?: string;
 }
+
+/** Item do plano a executar no Holyrics — ids vindos de LiturgyPlan.holyricsEventId e do
+ * holyricsItemId em lastPreparedManifest. */
+export interface IExecutarItemParams {
+  holyricsEventId: string;
+  holyricsItemId: string;
+}
+
+export interface IExecutarItemResult {
+  status: 'ok';
+  /** Nome do item na playlist do Holyrics. */
+  name?: string;
+}

@@ -28,12 +28,14 @@ Nenhuma outra ação deve ser chamada sem antes entrar nesta lista.
 | `GetSongGroups` | 2.24.0 | — | sincronizar catálogo | Leitura |
 | `GetBibleVersionsV2` | 2.23.0 | — | sincronizar catálogo | Leitura |
 | `GetSchedules` | 2.19.0 (`metadata.event` 2.25.0) | — | preparar | Leitura |
+| `GetCurrentSchedule` | 2.19.0 (`metadata.event` 2.25.0) | — | executar item | Leitura |
 | `CreateSong` | — | Plan + permissão avançada | criar músicas pendentes | Cria música |
 | `EditSong` | 2.25.0 | Plan + permissão avançada | editar música | **Recria os slides** e troca título/artista |
 | `CreateEvent` | — | Plan + permissão avançada | preparar | Cria evento |
 | `AddToPlaylist` | 2.20.0 (`event_id` 2.26.0) | Plan (com `event_id`) | preparar | Adiciona itens à playlist do evento |
 | `SetCurrentSchedule` | 2.26.0 | Plan | preparar | **Troca o culto selecionado na interface** |
 | `DeleteEvent` | — | Plan + permissão avançada | preparar | **Apaga evento** |
+| `MediaPlaylistAction` | 2.19.0 | — | executar item | **Exibe o item da playlist no telão** |
 
 ## Por fluxo
 
@@ -86,3 +88,15 @@ a playlist está sendo montada. Só no final o evento novo passa a ser o selecio
 
 Regra: **não** chamar `SetCurrentSchedule` antes do passo 5, nem `GetMediaPlaylist` na preparação.
 `GetMediaPlaylist` não aceita `event_id` e lê a playlist do culto selecionado.
+
+### Executar item — `executarItem` ([src/holyrics/executeItem.ts](src/holyrics/executeItem.ts))
+IPC `holyrics:executar-item`. O operador executa um item do plano (`holyricsEventId` do plano e
+`holyricsItemId` do item em `lastPreparedManifest`) na playlist do culto selecionado no Holyrics.
+Recusa se houver uma preparação rodando neste computador.
+1. `GetCurrentSchedule` (`{}`): lê o culto selecionado na interface. Se o `metadata.event.id` não
+   for o `holyricsEventId` do plano, **bloqueia** com erro. Se o `holyricsItemId` não estiver na
+   `media_playlist`, também bloqueia e pede para preparar de novo.
+2. `MediaPlaylistAction` (`id`): executa o item. Devolve o `name` dele na `media_playlist`.
+
+Regra: **não** chamar `SetCurrentSchedule` aqui. Trocar o culto selecionado tiraria do ar o que
+está sendo exibido; quem escolhe o culto é o operador, no próprio Holyrics.

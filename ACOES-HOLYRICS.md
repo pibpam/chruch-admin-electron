@@ -27,8 +27,8 @@ Nenhuma outra ação deve ser chamada sem antes entrar nesta lista.
 | `GetBackgrounds` | 2.19.0 | — | sincronizar catálogo | Leitura |
 | `GetSongGroups` | 2.24.0 | — | sincronizar catálogo | Leitura |
 | `GetBibleVersionsV2` | 2.23.0 | — | sincronizar catálogo | Leitura |
-| `GetSchedules` | 2.19.0 (`metadata.event` 2.25.0) | — | preparar | Leitura |
-| `GetCurrentSchedule` | 2.19.0 (`metadata.event` 2.25.0) | — | executar item | Leitura |
+| `GetSchedules` | 2.19.0 (`metadata.event` 2.25.0) | — | preparar (reserva) | Leitura |
+| `GetCurrentSchedule` | 2.19.0 (`metadata.event` 2.25.0) | — | preparar, executar item | Leitura |
 | `CreateSong` | — | Plan + permissão avançada | criar músicas pendentes | Cria música |
 | `EditSong` | 2.25.0 | Plan + permissão avançada | editar música | **Recria os slides** e troca título/artista |
 | `CreateEvent` | — | Plan + permissão avançada | preparar | Cria evento |
@@ -79,14 +79,16 @@ a playlist está sendo montada. Só no final o evento novo passa a ser o selecio
 2. `CreateEvent` (`name`): **sempre** cria um evento novo. O id novo é devolvido em `holyricsEventId`.
 3. `AddToPlaylist` (`items`, `event_id`): adiciona todos os itens à playlist do evento novo,
    em ordem inversa à do manifest (correção empírica, ver o comentário no código).
-4. `GetSchedules` (`month`, `year`): relê a playlist do evento, procurando pelo
-   `metadata.event.id`, para guardar no snapshot o id que o Holyrics deu a cada item. Se falhar,
-   a preparação não falha.
-5. `SetCurrentSchedule` (`event_id`): deixa o evento novo selecionado na interface.
+4. `SetCurrentSchedule` (`event_id`): deixa o evento novo selecionado na interface.
+5. `GetCurrentSchedule` (`{}`): relê a playlist do culto selecionado (o evento novo, conferido
+   pelo `metadata.event.id`) para guardar no snapshot o id que o Holyrics deu a cada item — é esse
+   id que o "Executar item" usa. Se o selecionado não for o evento novo, procura com `GetSchedules`
+   (`month`, `year`) pelo `metadata.event.id`. Os itens são casados por posição, conferindo o tipo;
+   item com tipo diferente fica sem vínculo. Se falhar, a preparação não falha, só avisa no log.
 6. `DeleteEvent` (`id`): apaga o evento da preparação anterior (`params.holyricsEventId`). Se
    falhar, a preparação não falha, e o evento antigo fica sobrando no Holyrics.
 
-Regra: **não** chamar `SetCurrentSchedule` antes do passo 5, nem `GetMediaPlaylist` na preparação.
+Regra: **não** chamar `SetCurrentSchedule` antes do passo 4, nem `GetMediaPlaylist` na preparação.
 `GetMediaPlaylist` não aceita `event_id` e lê a playlist do culto selecionado.
 
 ### Executar item — `executarItem` ([src/holyrics/executeItem.ts](src/holyrics/executeItem.ts))

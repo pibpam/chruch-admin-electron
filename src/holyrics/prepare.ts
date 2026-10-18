@@ -127,10 +127,20 @@ function itemAlerta(mensagem: string): Record<string, unknown> {
   };
 }
 
-interface ISchedule {
-  media_playlist: { id: string }[];
-  metadata?: { event?: { id?: string } | null };
+interface IPlaylistEntry {
+  id: string;
+  type?: string;
+  name?: string;
 }
+
+interface ISchedule {
+  media_playlist: IPlaylistEntry[];
+  metadata?: { event?: { id?: string | number } | null };
+}
+
+/** O Holyrics pode devolver o id do evento como número em um lugar e texto em outro. */
+const mesmoEvento = (schedule: ISchedule | null | undefined, eventId: string) =>
+  schedule?.metadata?.event?.id !== undefined && String(schedule.metadata.event.id) === String(eventId);
 
 /**
  * Lê a playlist de mídia de um evento específico sem mexer no culto selecionado na interface
@@ -143,7 +153,7 @@ async function getEventMediaPlaylist(
   client: HolyricsClient,
   eventId: string,
   eventDateTime: string,
-): Promise<{ id: string }[]> {
+): Promise<IPlaylistEntry[]> {
   const [ano, mes] = eventDateTime.split('-').map(Number);
   const agora = new Date();
   const meses = [
@@ -153,7 +163,7 @@ async function getEventMediaPlaylist(
 
   for (const { year, month } of meses) {
     const schedules = await client.request<ISchedule[]>('GetSchedules', { month, year });
-    const schedule = schedules.find((s) => s.metadata?.event?.id === eventId);
+    const schedule = schedules.find((s) => mesmoEvento(s, eventId));
     if (schedule) return schedule.media_playlist ?? [];
   }
 
@@ -172,6 +182,81 @@ async function garantirVersaoComEventId(client: HolyricsClient): Promise<void> {
       `O Holyrics ${version} não permite preparar um culto sem tirar do ar o que está selecionado. Atualize para a versão 2.26.0 ou superior.`,
     );
   }
+}
+
+/**
+ * Casa cada item enviado com o id que ele ganhou na playlist do Holyrics. Lê a playlist do culto
+ * selecionado (o evento recém-preparado) e, se não for ele, procura pelo GetSchedules. Casa por
+ * posição, conferindo o tipo de cada item — pra nunca executar o item errado.
+ */
+async function vincularItens(
+  client: HolyricsClient,
+  args: {
+    manifest: IManifestItem[];
+    holyricsEventId: string;
+    eventDateTime: string;
+    ordens: number[][];
+    tipoDe: (index: number) => string;
+    onProgresso: (progresso: IPrepararProgresso) => void;
+  },
+): Promise<IPreparedManifestItem[]> {
+  const key = 'vinculo';
+  const label = 'Vinculando os itens para executar pela tela';
+  args.onProgresso({ key, status: 'running', label });
+
+  let playlist: IPlaylistEntry[] = [];
+  try {
+    const resposta = await client.request<ISchedule | ISchedule[]>('GetCurrentSchedule', {});
+    const atual = Array.isArray(resposta) ? resposta[0] : resposta;
+    playlist = mesmoEvento(atual, args.holyricsEventId)
+      ? atual.media_playlist ?? []
+      : await getEventMediaPlaylist(client, args.holyricsEventId, args.eventDateTime);
+  } catch (err) {
+    console.error('Falha ao ler a playlist após preparar:', err);
+  }
+
+  // Mesma quantidade de itens: escolhe a ordem (direta ou invertida) em que mais tipos batem e
+  // vincula só as posições cujo tipo bate — um item que o Holyrics reporte com outro tipo fica sem
+  // botão, mas não derruba o vínculo dos demais nem arrisca executar o item errado.
+  const acertos = (indices: number[]) =>
+    indices.filter((index, posicao) => playlist[posicao]?.type === args.tipoDe(index)).length;
+  const ordem = args.ordens
+    .filter((indices) => indices.length > 0 && indices.length === playlist.length)
+    .sort((a, b) => acertos(b) - acertos(a))
+    .find((indices) => acertos(indices) * 2 >= indices.length);
+
+  const idPorIndice = new Map<number, string>();
+  ordem?.forEach((index, posicao) => {
+    if (playlist[posicao]?.type === args.tipoDe(index)) idPorIndice.set(index, String(playlist[posicao].id));
+  });
+
+  const semVinculo = ordem ? ordem.length - idPorIndice.size : 0;
+  if (ordem && !semVinculo) {
+    args.onProgresso({ key, status: 'done', label, detail: `${idPorIndice.size} item(ns) vinculado(s)` });
+  } else if (ordem) {
+    console.error('Itens com tipo diferente na playlist do Holyrics:', playlist);
+    args.onProgresso({
+      key,
+      status: 'warning',
+      label,
+      detail: `${idPorIndice.size} item(ns) vinculado(s) · ${semVinculo} sem o botão Executar (tipo diferente no Holyrics)`,
+    });
+  } else {
+    console.error('Playlist do Holyrics não bate com os itens enviados:', playlist);
+    args.onProgresso({
+      key,
+      status: 'warning',
+      label,
+      detail: playlist.length
+        ? 'A playlist do Holyrics não bate com o roteiro enviado — o botão Executar não ficará disponível.'
+        : 'Não foi possível ler a playlist do Holyrics — o botão Executar não ficará disponível.',
+    });
+  }
+
+  return args.manifest.map((item, index) => {
+    const holyricsItemId = idPorIndice.get(index);
+    return holyricsItemId ? { ...item, holyricsItemId } : { ...item };
+  });
 }
 
 /**
@@ -335,33 +420,25 @@ export async function prepararEvento(
     );
   }
 
-  // Snapshot pra lastPreparedManifest — não usado hoje pra decidir nada (preparação incremental
-  // foi revertida), mas mantido pra eventual uso futuro. Casa a playlist do evento com a ordem em
-  // que os itens foram efetivamente enviados (sendOrderIndexes), não a ordem do manifest.
-  // Snapshot é best-effort: se não achar o evento, salva sem holyricsItemId em vez de falhar
-  // uma preparação que já foi concluída.
-  const playlistDepois = await getEventMediaPlaylist(client, holyricsEventId, params.eventDateTime).catch(
-    (err): { id: string }[] => {
-      console.error('Falha ao ler a playlist após preparar:', err);
-      return [];
-    },
-  );
-  const holyricsIdByIndex = new Map<number, string>();
-  sendOrderIndexes.forEach((index, position) => {
-    const entry = playlistDepois[position];
-    if (entry) holyricsIdByIndex.set(index, entry.id);
-  });
-
-  const preparedManifest: IPreparedManifestItem[] = params.manifest.map((item, index) => {
-    const holyricsItemId = holyricsIdByIndex.get(index);
-    return holyricsItemId ? { ...item, holyricsItemId } : { ...item };
-  });
-
   // Só no fim, com a playlist já montada: deixa o evento preparado selecionado na interface.
   // Não pode ir antes — durante a montagem o culto selecionado não deve mudar.
   await etapa('selecionar', 'Selecionando o culto na tela do Holyrics', () =>
     client.request('SetCurrentSchedule', { event_id: holyricsEventId }),
   );
+
+  // Snapshot pra lastPreparedManifest: o id que o Holyrics deu a cada item da playlist é o que o
+  // botão "Executar" da página usa (MediaPlaylistAction). Lido depois de selecionar, pelo culto
+  // selecionado (GetCurrentSchedule) — o GetSchedules por mês nem sempre acha o evento recém-criado.
+  // Best-effort: se não der pra vincular, a preparação não falha, só avisa.
+  const preparedManifest = await vincularItens(client, {
+    manifest: params.manifest,
+    holyricsEventId,
+    eventDateTime: params.eventDateTime,
+    // Ordem do manifest e ordem de envio (invertida) — a playlist pode estar em qualquer uma.
+    ordens: [resolvedIndexes, sendOrderIndexes],
+    tipoDe: (index) => String((resolved[index] as Record<string, unknown>).type || ''),
+    onProgresso,
+  });
 
   // Apaga o evento da preparação anterior só depois do novo estar montado e selecionado —
   // assim nunca se apaga o que está selecionado. Best-effort: se falhar, o novo já está pronto

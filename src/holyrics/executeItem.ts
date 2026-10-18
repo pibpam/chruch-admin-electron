@@ -5,7 +5,7 @@ import { IExecutarItemParams, IExecutarItemResult } from '../types';
 
 interface ICurrentSchedule {
   media_playlist?: { id: string; type?: string; name?: string }[];
-  metadata?: { event?: { id?: string } | null };
+  metadata?: { event?: { id?: string | number } | null };
 }
 
 /**
@@ -25,13 +25,14 @@ export async function executarItem({ holyricsEventId, holyricsItemId }: IExecuta
   const resposta = await client.request<ICurrentSchedule | ICurrentSchedule[]>('GetCurrentSchedule', {});
   const schedule = Array.isArray(resposta) ? resposta[0] : resposta;
 
-  if (schedule?.metadata?.event?.id !== holyricsEventId) {
+  // String(): o Holyrics pode devolver o id do evento como número.
+  if (String(schedule?.metadata?.event?.id ?? '') !== String(holyricsEventId)) {
     throw new Error(
       'O Holyrics está com outro culto selecionado. Selecione o culto deste plano no Holyrics ou prepare novamente.',
     );
   }
 
-  const item = schedule.media_playlist?.find((entry) => entry.id === holyricsItemId);
+  const item = schedule.media_playlist?.find((entry) => String(entry.id) === String(holyricsItemId));
   if (!item) {
     throw new Error(
       'Este item não está mais na playlist do Holyrics (alguém pode ter mexido direto lá). Prepare o plano novamente.',

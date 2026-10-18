@@ -1,4 +1,4 @@
-import { app, autoUpdater, BrowserWindow, ipcMain, Menu, session } from 'electron';
+import { app, autoUpdater, BrowserWindow, dialog, ipcMain, Menu, MessageBoxOptions, session } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
@@ -69,9 +69,55 @@ autoUpdater.on('before-quit-for-update', () => {
   encerrando = true;
 });
 
-// No-op em dev (app.isPackaged === false); em produção checa releases
-// públicas do GitHub e aplica o update automaticamente.
-updateElectronApp({ repo: 'pibpam/chruch-admin-electron' });
+// Versões em que a pessoa escolheu "Depois" — o update-electron-app checa de novo a cada 10 min e
+// baixa de novo, então sem isso o aviso voltaria toda vez. Aplica sozinho ao reabrir o app.
+const atualizacoesAdiadas = new Set<string>();
+let avisoAtualizacaoAberto = false;
+
+/** Aviso de update baixado, pedindo pra reiniciar — no lugar do diálogo padrão (em inglês). */
+async function avisarAtualizacao(releaseName?: string) {
+  const versao = (releaseName || '').replace(/^v/, '');
+  if (avisoAtualizacaoAberto || atualizacoesAdiadas.has(versao)) return;
+  avisoAtualizacaoAberto = true;
+
+  // Reiniciar no meio da preparação interromperia a montagem da playlist no Holyrics.
+  const preparando = statusPreparacao()?.status === 'running';
+  const opcoes: MessageBoxOptions = {
+    type: 'info',
+    title: 'Atualização disponível',
+    message: versao
+      ? `A versão ${versao} do ChurchAdmin foi baixada.`
+      : 'Uma nova versão do ChurchAdmin foi baixada.',
+    detail: preparando
+      ? 'Tem uma preparação de culto em andamento. Espere ela terminar para reiniciar, ou deixe para depois: a atualização é aplicada na próxima vez que o app abrir.'
+      : 'Reinicie o app para usar a versão nova. Se deixar para depois, a atualização é aplicada na próxima vez que o app abrir.',
+    buttons: ['Reiniciar agora', 'Depois'],
+    defaultId: preparando ? 1 : 0,
+    cancelId: 1,
+    noLink: true,
+  };
+
+  try {
+    // Com a janela escondida na bandeja, o diálogo abre sozinho (preso a ela, ficaria invisível).
+    const janela = mainWindow?.isVisible() ? mainWindow : null;
+    const { response } = janela
+      ? await dialog.showMessageBox(janela, opcoes)
+      : await dialog.showMessageBox(opcoes);
+    if (response === 0) autoUpdater.quitAndInstall();
+    else atualizacoesAdiadas.add(versao);
+  } finally {
+    avisoAtualizacaoAberto = false;
+  }
+}
+
+// No-op em dev (app.isPackaged === false); em produção checa releases públicas do GitHub,
+// baixa o update e pergunta se quer reiniciar (ver avisarAtualizacao).
+updateElectronApp({
+  repo: 'pibpam/chruch-admin-electron',
+  onNotifyUser: ({ releaseName }) => {
+    void avisarAtualizacao(releaseName);
+  },
+});
 
 /**
  * O Electron não hospeda UI própria — a janela carrega a página do admin web

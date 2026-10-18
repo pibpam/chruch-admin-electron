@@ -1,10 +1,11 @@
 import { HolyricsClient } from '../holyricsClient';
 import { state } from '../state';
-import { ICriarMusicaPendenteResult, IPendingSong } from '../types';
+import { ICriarMusicaPendenteResult, IEditarMusicaParams, IPendingSong } from '../types';
 
 interface ICatalogSong {
   id: string;
   extras?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 /**
@@ -37,4 +38,26 @@ export async function criarMusicasPendentes(pendentes: IPendingSong[]): Promise<
   }
 
   return criadas;
+}
+
+/**
+ * Aplica no Holyrics a edição de uma música que já existe: EditSong recria todos os slides
+ * com o texto enviado (que já traz as anotações `//` que o editor manteve) e troca título e
+ * artista. Erro é repassado pra página, que registra como aviso e segue a preparação com a
+ * música como estava.
+ */
+export async function editarMusica(edicao: IEditarMusicaParams): Promise<{ status: string }> {
+  const client = new HolyricsClient(state.requireConnection());
+  await client.request('EditSong', {
+    id: edicao.song_id,
+    title: edicao.titulo,
+    artist: edicao.artista || '',
+    slides: edicao.slides,
+  });
+
+  const musicas = (state.catalogoLocal.musicas || []) as ICatalogSong[];
+  const local = musicas.find((item) => String(item.id) === edicao.song_id);
+  if (local) Object.assign(local, { title: edicao.titulo, artist: edicao.artista || '' });
+
+  return { status: 'ok' };
 }

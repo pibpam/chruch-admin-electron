@@ -111,6 +111,14 @@ export interface IPendingSong {
   slides: { text: string }[];
 }
 
+/** Edição pendente de uma música que já existe no Holyrics (letra, título e artista). */
+export interface IEditarMusicaParams {
+  song_id: string;
+  titulo: string;
+  artista?: string;
+  slides: { text: string }[];
+}
+
 export interface ICriarMusicaPendenteResult {
   musica_id: string;
   holyrics_id: string;

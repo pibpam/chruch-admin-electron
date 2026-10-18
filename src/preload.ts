@@ -3,6 +3,7 @@ import {
   IConfigurarIntegracaoParams,
   ICatalogUrls,
   ICriarMusicaPendenteResult,
+  IEditarMusicaParams,
   IHealthcheckResult,
   IPendingSong,
   IPrepararEventoParams,
@@ -42,6 +43,10 @@ contextBridge.exposeInMainWorld('holyricsBridge', {
 
   criarMusicasPendentes: (pendentes: IPendingSong[]): Promise<ICriarMusicaPendenteResult[]> =>
     ipcRenderer.invoke('holyrics:criar-pendentes', pendentes),
+
+  /** Aplica no Holyrics a edição pendente de uma música que já existe (EditSong). */
+  editarMusica: (edicao: IEditarMusicaParams): Promise<{ status: string }> =>
+    ipcRenderer.invoke('holyrics:editar-musica', edicao),
 
   statusConexao: (): Promise<IHealthcheckResult> => ipcRenderer.invoke('holyrics:healthcheck'),
 

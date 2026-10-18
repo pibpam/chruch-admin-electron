@@ -29,6 +29,7 @@ Nenhuma outra ação deve ser chamada sem antes entrar nesta lista.
 | `GetBibleVersionsV2` | 2.23.0 | — | sincronizar catálogo | Leitura |
 | `GetSchedules` | 2.19.0 (`metadata.event` 2.25.0) | — | preparar | Leitura |
 | `CreateSong` | — | Plan + permissão avançada | criar músicas pendentes | Cria música |
+| `EditSong` | 2.25.0 | Plan + permissão avançada | editar música | **Recria os slides** e troca título/artista |
 | `CreateEvent` | — | Plan + permissão avançada | preparar | Cria evento |
 | `AddToPlaylist` | 2.20.0 (`event_id` 2.26.0) | Plan (com `event_id`) | preparar | Adiciona itens à playlist do evento |
 | `SetCurrentSchedule` | 2.26.0 | Plan | preparar | **Troca o culto selecionado na interface** |
@@ -45,10 +46,10 @@ IPC `holyrics:healthcheck`. Só leitura, em paralelo:
 ### Sincronizar catálogo — `sincronizarCatalogo` ([src/holyrics/catalog.ts](src/holyrics/catalog.ts))
 IPC `holyrics:sincronizar-catalogo`. Só leitura. O resultado vai para o `state.catalogoLocal` e para o S3.
 - `GetSongs` (`fields: id,title,artist,author,key,bpm,groups,extras`): músicas, sem a letra.
-- `GetLyrics` (`id`): uma chamada por música, até 5 ao mesmo tempo, depois do `GetSongs`. Guarda só o
+- `GetLyrics` (`id`): uma chamada por música, até 5 ao mesmo tempo, depois do `GetSongs`. Guarda o
   `text` de cada slide em `slides`, com as quebras de linha padronizadas em `\n` e sem os slides ou
-  linhas que começam com `//`. Se a chamada falhar, a sincronização não falha, e a música é salva
-  sem `slides`.
+  linhas que começam com `//`, e em `slides_original` com as `//` (usado pelo editor da letra). Se a
+  chamada falhar, a sincronização não falha, e a música é salva sem `slides`.
 - `GetTexts` (`fields: id,title,folder,slides`): textos.
 - `GetThemes`: temas.
 - `GetScripts`: scripts.
@@ -60,6 +61,13 @@ IPC `holyrics:sincronizar-catalogo`. Só leitura. O resultado vai para o `state.
 IPC `holyrics:criar-pendentes`.
 - `CreateSong` (`title`, `artist`, `slides`, `extras.musica_id`): cria a música. Se o catálogo local já
   tem uma música com o mesmo `extras.musica_id`, reaproveita essa e não cria de novo.
+
+### Editar música — `editarMusica` ([src/holyrics/pendingSongs.ts](src/holyrics/pendingSongs.ts))
+IPC `holyrics:editar-musica`. Chamado pela página na preparação do plano (antes de `prepararEvento`),
+uma vez por música com edição de letra pendente, e pela lista de músicas pendentes.
+- `EditSong` (`id`, `title`, `artist`, `slides`): recria todos os slides da música com o texto editado,
+  que já traz as anotações `//` mantidas pelo editor. Descrição, tradução e plano de fundo por slide e a
+  ordem (`order`) não são enviados. Se falhar, a página registra aviso e a música segue como estava.
 
 ### Preparar — `prepararEvento` ([src/holyrics/prepare.ts](src/holyrics/prepare.ts))
 IPC `holyrics:preparar`. Monta um evento novo sem alterar o culto selecionado na interface enquanto

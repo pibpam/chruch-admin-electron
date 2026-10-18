@@ -15,8 +15,11 @@ async function putJson(url: string, data: unknown): Promise<void> {
 interface ICatalogSong {
   id?: string;
   slides?: { text: string }[];
+  slides_original?: { text: string }[];
   [key: string]: unknown;
 }
+
+type ILetra = Pick<ICatalogSong, 'slides' | 'slides_original'>;
 
 /** Quantas chamadas GetLyrics ficam em andamento ao mesmo tempo durante a sincronização. */
 const LETRAS_EM_PARALELO = 5;
@@ -43,25 +46,35 @@ function limparTextoSlide(texto: unknown): string | null {
   return limpo || null;
 }
 
+/** Slide como está no Holyrics, com as anotações `//` — só as quebras de linha padronizadas. */
+function textoOriginalSlide(texto: unknown): string | null {
+  if (typeof texto !== 'string') return null;
+  const original = texto.replace(/\r\n?/g, '\n').trim();
+  return original || null;
+}
+
+const paraSlides = (textos: (string | null)[]): { text: string }[] =>
+  textos.filter((texto): texto is string => !!texto).map((text) => ({ text }));
+
 /**
- * GetLyrics de uma música, reduzido a `{ text }` por slide. Falha (ou música sem slides)
- * vira null — a sincronização segue e a música é salva sem letra.
+ * GetLyrics de uma música: `slides` é a letra pra exibição (sem `//`) e `slides_original` o
+ * texto de cada slide como está no Holyrics, usado pelo editor da letra na página — assim
+ * recriar os slides na edição (ver pendingSongs.editarMusica) não apaga as anotações.
+ * Falha (ou música sem slides) vira null — a sincronização segue e a música é salva sem letra.
  */
-async function buscarSlides(client: HolyricsClient, id: string): Promise<{ text: string }[] | null> {
+async function buscarSlides(client: HolyricsClient, id: string): Promise<ILetra | null> {
   try {
     const letra = await client.request<{ slides?: { text?: unknown }[] } | null>('GetLyrics', { id });
-    const slides = (letra?.slides || [])
-      .map((slide) => limparTextoSlide(slide?.text))
-      .filter((texto): texto is string => !!texto)
-      .map((text) => ({ text }));
-    return slides.length ? slides : null;
+    const textos = (letra?.slides || []).map((slide) => slide?.text);
+    const slides = paraSlides(textos.map(limparTextoSlide));
+    return slides.length ? { slides, slides_original: paraSlides(textos.map(textoOriginalSlide)) } : null;
   } catch (err) {
     console.warn(`Letra da música ${id} não carregada:`, err);
     return null;
   }
 }
 
-/** Preenche `slides` de cada música via GetLyrics, em lotes de LETRAS_EM_PARALELO. */
+/** Preenche `slides`/`slides_original` de cada música via GetLyrics, em lotes de LETRAS_EM_PARALELO. */
 async function carregarLetras(client: HolyricsClient, musicas: ICatalogSong[]): Promise<ICatalogSong[]> {
   const resultado: ICatalogSong[] = new Array(musicas.length);
   let proxima = 0;
@@ -70,8 +83,8 @@ async function carregarLetras(client: HolyricsClient, musicas: ICatalogSong[]): 
     while (proxima < musicas.length) {
       const indice = proxima++;
       const musica = musicas[indice];
-      const slides = musica.id ? await buscarSlides(client, String(musica.id)) : null;
-      resultado[indice] = slides ? { ...musica, slides } : musica;
+      const letra = musica.id ? await buscarSlides(client, String(musica.id)) : null;
+      resultado[indice] = letra ? { ...musica, ...letra } : musica;
     }
   };
 

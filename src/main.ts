@@ -13,11 +13,12 @@ import {
   statusPreparacao,
 } from './holyrics/preparacaoAtual';
 import { statusConexao } from './holyrics/healthcheck';
-import { criarMusicasPendentes } from './holyrics/pendingSongs';
+import { criarMusicasPendentes, editarMusica } from './holyrics/pendingSongs';
 import { criarBandeja, mostrar } from './tray';
 import {
   ICatalogUrls,
   IConfigurarIntegracaoParams,
+  IEditarMusicaParams,
   IPendingSong,
   IPrepararEventoParams,
 } from './types';
@@ -207,6 +208,8 @@ ipcMain.handle('holyrics:preparar:descartar', (_event, planUuid: string) => desc
 ipcMain.handle('holyrics:criar-pendentes', async (_event, pendentes: IPendingSong[]) => {
   return criarMusicasPendentes(pendentes);
 });
+
+ipcMain.handle('holyrics:editar-musica', async (_event, edicao: IEditarMusicaParams) => editarMusica(edicao));
 
 ipcMain.handle('holyrics:healthcheck', async () => statusConexao());
 

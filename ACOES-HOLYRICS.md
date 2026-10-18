@@ -20,6 +20,7 @@ Nenhuma outra ação deve ser chamada sem antes entrar nesta lista.
 | `GetHolyricsPlanInfo` | 2.28.0 | — | healthcheck | Leitura |
 | `GetAPIServerInfo` | 2.26.0 | — | healthcheck | Leitura |
 | `GetSongs` | 2.21.0 | — | sincronizar catálogo | Leitura |
+| `GetLyrics` | 2.19.0 | — | sincronizar catálogo | Leitura |
 | `GetTexts` | 2.21.0 | — | sincronizar catálogo | Leitura |
 | `GetThemes` | 2.27.0 | — | sincronizar catálogo | Leitura |
 | `GetScripts` | 2.21.0 | — | sincronizar catálogo | Leitura |
@@ -43,7 +44,11 @@ IPC `holyrics:healthcheck`. Só leitura, em paralelo:
 
 ### Sincronizar catálogo — `sincronizarCatalogo` ([src/holyrics/catalog.ts](src/holyrics/catalog.ts))
 IPC `holyrics:sincronizar-catalogo`. Só leitura. O resultado vai para o `state.catalogoLocal` e para o S3.
-- `GetSongs` (`fields: id,title,artist,author,key,bpm,slides,groups,extras`): músicas com os slides.
+- `GetSongs` (`fields: id,title,artist,author,key,bpm,groups,extras`): músicas, sem a letra.
+- `GetLyrics` (`id`): uma chamada por música, até 5 ao mesmo tempo, depois do `GetSongs`. Guarda só o
+  `text` de cada slide em `slides`, com as quebras de linha padronizadas em `\n` e sem os slides ou
+  linhas que começam com `//`. Se a chamada falhar, a sincronização não falha, e a música é salva
+  sem `slides`.
 - `GetTexts` (`fields: id,title,folder,slides`): textos.
 - `GetThemes`: temas.
 - `GetScripts`: scripts.
